@@ -10,45 +10,86 @@
   <div id="app">
     <header>
       <h1>🏠 Segal House Designer</h1>
-      <p>Design your low-energy home on a modular grid</p>
+      <p>Draw your home on a 900mm modular grid • Click two points to place walls</p>
     </header>
     
     <div class="toolbar">
-      <button id="addWall" class="tool-btn">🧱 Add Wall</button>
-      <button id="addWindow" class="tool-btn">🪟 Add Window</button>
-      <button id="addDoor" class="tool-btn">🚪 Add Door</button>
-      <select id="insulationLevel">
-        <option value="0.18">High Insulation (U=0.18)</option>
-        <option value="0.35">Standard (U=0.35)</option>
-        <option value="1.2">Windows (U=1.2)</option>
-      </select>
-      <button id="clearCanvas" class="secondary">Clear All</button>
-      <button id="exportDesign" class="secondary">💾 Export</button>
+      <div class="mode-group">
+        <span class="mode-label">Mode:</span>
+        <button id="modeExterior" class="mode-btn active">🧱 Exterior Wall</button>
+        <button id="modeInterior" class="mode-btn">🔲 Interior Wall</button>
+        <button id="modeDelete" class="mode-btn">❌ Delete</button>
+      </div>
+      
+      <div class="insulation-group">
+        <label>Insulation:</label>
+        <select id="insulationLevel">
+          <option value="0.18">High (U=0.18)</option>
+          <option value="0.35" selected>Standard (U=0.35)</option>
+          <option value="0.90">Low (U=0.90)</option>
+        </select>
+      </div>
+      
+      <div class="action-group">
+        <button id="toggleGrid" class="secondary">📐 Toggle Grid</button>
+        <button id="clearAll" class="danger">🗑️ Clear All</button>
+        <button id="exportDesign" class="secondary">💾 Export</button>
+      </div>
     </div>
     
     <div class="main-content">
       <aside id="sidebar">
-        <h3>Component Library</h3>
-        <div class="component" onclick="document.getElementById('addWall').click()">
-          <span class="swatch wall"></span> Wall Panel
-        </div>
-        <div class="component" onclick="document.getElementById('addWindow').click()">
-          <span class="swatch window"></span> Window
-        </div>
-        <div class="component" onclick="document.getElementById('addDoor').click()">
-          <span class="swatch door"></span> Door
-        </div>
+        <section class="sidebar-section">
+          <h3>Instructions</h3>
+          <ol>
+            <li>Select a mode (Exterior/Interior/Delete)</li>
+            <li>Click first grid point</li>
+            <li>Click second grid point to place wall</li>
+            <li>Press ESC or click another point to cancel</li>
+          </ol>
+        </section>
         
-        <div class="stats">
-          <h3>Energy Stats</h3>
-          <div id="moduleCount">Modules: 0</div>
-          <div id="energyScore">Score: --</div>
-          <div id="heatLoss">Heat Loss: -- W/K</div>
-        </div>
+        <section class="sidebar-section">
+          <h3>Stats</h3>
+          <div class="stat-row">
+            <span>Total length:</span>
+            <span id="totalLength">0 m</span>
+          </div>
+          <div class="stat-row">
+            <span>Exterior walls:</span>
+            <span id="exteriorLength">0 m</span>
+          </div>
+          <div class="stat-row">
+            <span>Interior walls:</span>
+            <span id="interiorLength">0 m</span>
+          </div>
+          <div class="stat-row">
+            <span>Energy score:</span>
+            <span id="energyScore">--</span>
+          </div>
+          <div class="stat-row">
+            <span>Heat loss:</span>
+            <span id="heatLoss">-- W/K</span>
+          </div>
+        </section>
+        
+        <section class="sidebar-section">
+          <h3>Legend</h3>
+          <div class="legend-item">
+            <span class="swatch exterior"></span> Exterior wall
+          </div>
+          <div class="legend-item">
+            <span class="swatch interior"></span> Interior wall
+          </div>
+          <div class="legend-item">
+            <span class="dot point"></span> Grid point
+          </div>
+        </section>
       </aside>
       
       <main id="canvas-container">
         <canvas id="gridCanvas"></canvas>
+        <div id="cursor-follow" class="cursor-follow"></div>
       </main>
     </div>
     
