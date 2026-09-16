@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Segal House Designer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>🏠 Segal House Designer</h1>
+      <p>Design your low-energy home on a modular grid</p>
+    </header>
+    
+    <div class="toolbar">
+      <button id="addWall" class="tool-btn">🧱 Add Wall</button>
+      <button id="addWindow" class="tool-btn">🪟 Add Window</button>
+      <button id="addDoor" class="tool-btn">🚪 Add Door</button>
+      <select id="insulationLevel">
+        <option value="0.18">High Insulation (U=0.18)</option>
+        <option value="0.35">Standard (U=0.35)</option>
+        <option value="1.2">Windows (U=1.2)</option>
+      </select>
+      <button id="clearCanvas" class="secondary">Clear All</button>
+      <button id="exportDesign" class="secondary">💾 Export</button>
+    </div>
+    
+    <div class="main-content">
+      <aside id="sidebar">
+        <h3>Component Library</h3>
+        <div class="component" onclick="document.getElementById('addWall').click()">
+          <span class="swatch wall"></span> Wall Panel
+        </div>
+        <div class="component" onclick="document.getElementById('addWindow').click()">
+          <span class="swatch window"></span> Window
+        </div>
+        <div class="component" onclick="document.getElementById('addDoor').click()">
+          <span class="swatch door"></span> Door
+        </div>
+        
+        <div class="stats">
+          <h3>Energy Stats</h3>
+          <div id="moduleCount">Modules: 0</div>
+          <div id="energyScore">Score: --</div>
+          <div id="heatLoss">Heat Loss: -- W/K</div>
+        </div>
+      </aside>
+      
+      <main id="canvas-container">
+        <canvas id="gridCanvas"></canvas>
+      </main>
+    </div>
+    
+    <footer>
+      <p>Built with the Walter Segal Method • Grid: 900mm modules</p>
+    </footer>
+  </div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
