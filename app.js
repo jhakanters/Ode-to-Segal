@@ -13,7 +13,7 @@ const WALL_HEIGHT_M = 2.4; // 2.4m ceiling height
 let currentMode = 'exterior';
 let selectedPoint = null;
 let walls = [];
-let openings = []; // { wallIndex, position, type, width }
+let openings = [];
 let gridPoints = [];
 let showGrid = true;
 
@@ -21,36 +21,40 @@ let showGrid = true;
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
   width: CANVAS_WIDTH,
   height: CANVAS_HEIGHT,
-  backgroundColor: '#fafafa'
+  backgroundColor: '#fafafa',
+  selection: false
 });
 
-// Three.js setup
-let scene, camera, renderer, walls3DGroup, openings3DGroup, gridPoints3DGroup;
+// Three.js variables
+let scene, camera, renderer;
+let walls3DGroup, openings3DGroup, gridPoints3DGroup;
 let autoRotate = true;
 let rotationAngle = 0;
+
+// ========== INITIALIZATION ==========
 
 initThree();
 initGridPoints();
 drawGridLines();
-updateStats();
 setupEventListeners();
+updateStats();
 renderThreeScene();
 
 // ========== THREE.JS 3D PREVIEW ==========
 
 function initThree() {
   const container = document.getElementById('three-canvas');
-  const width = container.clientWidth;
-  const height = container.clientHeight;
+  const width = container.clientWidth || 300;
+  const height = container.clientHeight || 400;
   
+  // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe8e8e8);
   
   // Camera
-  const aspect = width / height;
-  camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+  camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
   camera.position.set(15, 15, 15);
-  camera.lookAt(0, 0, 0);
+  camera.lookAt(0, 1, 0);
   
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -67,7 +71,7 @@ function initThree() {
   directionalLight.castShadow = true;
   scene.add(directionalLight);
   
-  // Groups for organized rendering
+  // Groups
   walls3DGroup = new THREE.Group();
   openings3DGroup = new THREE.Group();
   gridPoints3DGroup = new THREE.Group();
@@ -77,28 +81,24 @@ function initThree() {
   
   // Ground plane
   const groundGeometry = new THREE.PlaneGeometry(20, 20);
-  const groundMaterial = new THREE.MeshPhongMaterial({ 
-    color: 0xf0f0f0, 
-    side: THREE.DoubleSide 
-  });
+  const groundMaterial = new THREE.MeshPhongMaterial({ color: 0xf0f0f0, side: THREE.DoubleSide });
   const ground = new THREE.Mesh(groundGeometry, groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.1;
   scene.add(ground);
   
-  // Mouse controls for orbit
+  // Orbit controls
   let isDragging = false;
   let previousMousePosition = { x: 0, y: 0 };
   
-  renderer.domElement.addEventListener('mousedown', () => isDragging = true);
-  renderer.domElement.addEventListener('mouseup', () => isDragging = false);
-  renderer.domElement.addEventListener('mousemove', (e) => {
+  const canvas3D = renderer.domElement;
+  
+  canvas3D.addEventListener('mousedown', () => isDragging = true);
+  canvas3D.addEventListener('mouseup', () => isDragging = false);
+  canvas3D.addEventListener('mouseleave', () => isDragging = false);
+  canvas3D.addEventListener('mousemove', (e) => {
     if (isDragging) {
-      const deltaMove = {
-        x: e.offsetX - previousMousePosition.x,
-        y: e.offsetY - previousMousePosition.y
-      };
-      
+      const deltaMove = { x: e.offsetX - previousMousePosition.x, y: e.offsetY - previousMousePosition.y };
       rotationAngle += deltaMove.x * 0.01;
       camera.position.x = Math.sin(rotationAngle) * 15;
       camera.position.z = Math.cos(rotationAngle) * 15;
@@ -107,38 +107,38 @@ function initThree() {
     previousMousePosition = { x: e.offsetX, y: e.offsetY };
   });
   
-  renderer.domElement.addEventListener('wheel', (e) => {
+  canvas3D.addEventListener('wheel', (e) => {
+    e.preventDefault();
     const zoomSpeed = 0.01;
     camera.position.multiplyScalar(1 + e.deltaY * zoomSpeed);
     camera.lookAt(0, 1, 0);
   });
   
   window.addEventListener('resize', () => {
-    const newWidth = container.clientWidth;
-    const newHeight = container.clientHeight;
-    camera.aspect = newWidth / newHeight;
+    const container = document.getElementById('three-canvas');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    renderer.setSize(newWidth, newHeight);
+    renderer.setSize(width, height);
+    renderThreeScene();
   });
 }
 
 function renderThreeScene() {
-  // Clear previous
+  // Clear existing meshes
   while(walls3DGroup.children.length > 0) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length > 0) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length > 0) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
   
-  // Convert 2D grid coords to 3D world (flip Y axis)
-  const offset = {
-    x: (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000,
-    z: (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000
-  };
+  // Center offset for 3D world
+  const centerX = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
+  const centerZ = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   
   function gridToWorld(col, row) {
     return {
-      x: col * MODULE_SIZE / 1000 - offset.x,
-      z: (CANVAS_ROWS - row) * MODULE_SIZE / 1000 - offset.z,
-      y: WALL_HEIGHT_M / 2
+      x: col * MODULE_SIZE / 1000 - centerX,
+      z: (CANVAS_ROWS - row) * MODULE_SIZE / 1000 - centerZ
     };
   }
   
@@ -147,20 +147,17 @@ function renderThreeScene() {
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
     const pos = gridToWorld(p.gridData.col, p.gridData.row);
-    const sphere = new THREE.Mesh(pointGeo, pointMat);
+    const sphere = new THREE.Mesh(pointGeo, pointMat.clone());
     sphere.position.set(pos.x, 0, pos.z);
     gridPoints3DGroup.add(sphere);
   });
   
-  // Render walls
-  walls.forEach((wall, index) => {
+  // Render walls and openings
+  walls.forEach((wall, wallIndex) => {
     const start = gridToWorld(wall.waData.pointA.col, wall.waData.pointA.row);
     const end = gridToWorld(wall.waData.pointB.col, wall.waData.pointB.row);
     
-    const length = Math.sqrt(
-      Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2)
-    );
-    
+    const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2));
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
     
     // Wall mesh
@@ -177,28 +174,26 @@ function renderThreeScene() {
     wallMesh.rotation.y = -angle;
     wallMesh.castShadow = true;
     wallMesh.receiveShadow = true;
-    
     walls3DGroup.add(wallMesh);
     
     // Render openings on this wall
-    openings.filter(o => o.wallIndex === index).forEach(opening => {
+    const wallOpenings = openings.filter(o => o.wallIndex === wallIndex);
+    wallOpenings.forEach(opening => {
       const openingColor = opening.type === 'door' ? 0xff9800 : 0x4fc3f7;
-      const openingGeo = new THREE.BoxGeometry(
-        opening.width,
-        opening.type === 'door' ? 2.1 : 1.2,
-        0.2
-      );
+      const openingHeight = opening.type === 'door' ? 2.1 : 1.2;
+      
+      const openingGeo = new THREE.BoxGeometry(opening.width, openingHeight, 0.1);
       const openingMat = new THREE.MeshPhongMaterial({ color: openingColor });
       const openingMesh = new THREE.Mesh(openingGeo, openingMat);
       
-      // Position opening along wall
-      const ratio = opening.position; // 0 to 1 along wall length
-      const openingX = start.x + (end.x - start.x) * ratio;
-      const openingZ = start.z + (end.z - start.z) * ratio;
+      // Position opening along wall (ratio 0-1)
+      const openingRatio = opening.position;
+      const openingX = start.x + (end.x - start.x) * openingRatio;
+      const openingZ = start.z + (end.z - start.z) * openingRatio;
       
       openingMesh.position.set(
         openingX,
-        opening.type === 'door' ? 1.05 : WALL_HEIGHT_M / 2,
+        opening.type === 'door' ? openingHeight / 2 : WALL_HEIGHT_M / 2,
         openingZ
       );
       openingMesh.rotation.y = -angle;
@@ -213,7 +208,7 @@ function renderThreeScene() {
 function animate() {
   requestAnimationFrame(animate);
   
-  if (autoRotate && !renderer.domElement.matches(':hover')) {
+  if (autoRotate) {
     rotationAngle += 0.005;
     camera.position.x = Math.sin(rotationAngle) * 15;
     camera.position.z = Math.cos(rotationAngle) * 15;
@@ -291,7 +286,8 @@ function createWall(pointA, pointB) {
     stroke: currentMode === 'exterior' ? '#6d4aff' : '#4fc3f7',
     strokeWidth: 6,
     selectable: true,
-    evented: true
+    evented: true,
+    strokeLinecap: 'round'
   });
   
   line.waData = {
@@ -299,11 +295,15 @@ function createWall(pointA, pointB) {
     pointA: pointA.gridData,
     pointB: pointB.gridData,
     uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35),
-    id: `wall-${Date.now()}`
+    id: `wall-${walls.length}-${Date.now()}`
   };
+  
+  // Store wall index for opening references
+  line.waData.index = walls.length;
   
   walls.push(line);
   fabricCanvas.add(line);
+  fabricCanvas.sendToBack(line);
   
   selectedPoint = null;
   highlightSelected(null);
@@ -312,60 +312,71 @@ function createWall(pointA, pointB) {
   renderThreeScene();
 }
 
+// ========== MOUSE HANDLER WITH OPENING DETECTION ==========
+
 fabricCanvas.on('mouse:down', function(opt) {
   const evt = opt.e;
   const pointer = fabricCanvas.getPointer(evt);
-  const clickedPoint = findClosestPoint(pointer.x, pointer.y);
+  const mouseX = pointer.x;
+  const mouseY = pointer.y;
+  
+  console.log('Mode:', currentMode, 'Click at:', mouseX, mouseY);
   
   if (currentMode === 'delete') {
-    // Try to delete wall or opening
-    const nearbyWall = walls.find(w => {
-      const distA = Math.sqrt(
-        Math.pow(w.waData.pointA.col - clickedPoint.gridData.col, 2) +
-        Math.pow(w.waData.pointA.row - clickedPoint.gridData.row, 2)
-      );
-      const distB = Math.sqrt(
-        Math.pow(w.waData.pointB.col - clickedPoint.gridData.col, 2) +
-        Math.pow(w.waData.pointB.row - clickedPoint.gridData.row, 2)
-      );
-      return distA < 1 || distB < 1;
-    });
-    
-    if (nearbyWall) {
-      // Remove all openings on this wall first
-      openings = openings.filter(o => o.wallIndex !== walls.indexOf(nearbyWall));
+    // Delete wall by clicking near endpoints
+    const nearbyWall = findNearbyWall(mouseX, mouseY, 20);
+    if (nearbyWall !== null) {
+      const wallToRemove = walls[nearbyWall];
+      // Remove all openings on this wall
+      openings = openings.filter(o => o.wallIndex !== nearbyWall);
+      // Renumber remaining openings
+      openings = openings.map(o => ({
+        ...o,
+        wallIndex: o.wallIndex > nearbyWall ? o.wallIndex - 1 : o.wallIndex
+      }));
       
-      fabricCanvas.remove(nearbyWall);
-      walls = walls.filter(w => w !== nearbyWall);
+      fabricCanvas.remove(wallToRemove);
+      walls.splice(nearbyWall, 1);
       updateStats();
       renderThreeScene();
     }
     return;
   }
   
-  if (currentMode === 'opening' && clickedPoint) {
-    // Click on wall to add opening
-    const clickedWall = detectClickOnWall(pointer.x, pointer.y);
-    if (clickedWall) {
-      const openingType = confirm('OK for window? Click Cancel for door.') 
-        ? 'window' 
-        : 'door';
-      const openingWidth = openingType === 'door' ? 0.9 : 1.5; // meters
+  if (currentMode === 'opening') {
+    // Check if clicking on any exterior wall
+    const clickedWall = findClickOnWall(mouseX, mouseY, 15);
+    if (clickedWall !== null) {
+      const wall = walls[clickedWall.index];
+      if (wall.waData.mode !== 'exterior') {
+        alert('Openings can only be added to exterior walls.');
+        return;
+      }
+      
+      // Confirm opening type
+      const confirmWindow = confirm('OK for WINDOW\nCancel for DOOR');
+      const openingType = confirmWindow ? 'window' : 'door';
+      const openingWidth = openingType === 'door' ? 0.9 : 1.5;
       
       openings.push({
         wallIndex: clickedWall.index,
-        position: clickedWall.ratio, // 0 to 1 along wall
+        position: clickedWall.ratio,
         type: openingType,
         width: openingWidth
       });
       
+      console.log('Opening added:', openings[opens.length - 1]);
+      
       updateStats();
       renderThreeScene();
+      return;
     }
     return;
   }
   
-  // Normal wall drawing
+  // Normal wall drawing mode
+  const clickedPoint = findClosestPoint(mouseX, mouseY);
+  
   if (!selectedPoint) {
     selectedPoint = clickedPoint;
     highlightSelected(clickedPoint);
@@ -377,29 +388,32 @@ fabricCanvas.on('mouse:down', function(opt) {
   }
 });
 
-// Detect if mouse clicked on a wall line
-function detectClickOnWall(mouseX, mouseY) {
-  const tolerance = 10; // pixels from line
-  
+// Find closest wall to a point (within tolerance)
+function findNearbyWall(x, y, tolerance) {
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
-    const dist = pointLineDistance(
-      mouseX, mouseY,
-      wall.points[0], wall.points[1],
-      wall.points[2], wall.points[3]
-    );
+    const dist = pointLineDistance(x, y, wall.points[0], wall.points[1], wall.points[2], wall.points[3]);
+    if (dist < tolerance) return i;
+  }
+  return null;
+}
+
+// Detect if mouse click is ON a wall line
+function findClickOnWall(x, y, tolerance) {
+  for (let i = 0; i < walls.length; i++) {
+    const wall = walls[i];
+    const dist = pointLineDistance(x, y, wall.points[0], wall.points[1], wall.points[2], wall.points[3]);
     
     if (dist < tolerance) {
-      // Calculate position ratio along wall
-      const wallLength = Math.sqrt(
-        Math.pow(wall.points[2] - wall.points[0], 2) +
-        Math.pow(wall.points[3] - wall.points[1], 2)
-      );
-      const distFromStart = Math.sqrt(
-        Math.pow(mouseX - wall.points[0], 2) +
-        Math.pow(mouseY - wall.points[1], 2)
-      );
-      const ratio = Math.min(Math.max(distFromStart / wallLength, 0.1), 0.9);
+      // Calculate ratio along the wall (0 to 1)
+      const wallLenSq = Math.pow(wall.points[2] - wall.points[0], 2) + Math.pow(wall.points[3] - wall.points[1], 2);
+      const distFromStartSq = Math.pow(x - wall.points[0], 2) + Math.pow(y - wall.points[1], 2);
+      const wallLen = Math.sqrt(wallLenSq);
+      const distFromStart = Math.sqrt(distFromStartSq);
+      let ratio = wallLen > 0 ? distFromStart / wallLen : 0.5;
+      
+      // Clamp between 0.1 and 0.9 to prevent openings at exact endpoints
+      ratio = Math.max(0.1, Math.min(0.9, ratio));
       
       return { index: i, ratio };
     }
@@ -441,6 +455,7 @@ function highlightSelected(point) {
   gridPoints.forEach(p => {
     p.set('fill', p === selectedPoint ? '#ff6b6b' : '#28a745');
   });
+  fabricCanvas.requestRenderAll();
 }
 
 function updateStats() {
@@ -463,15 +478,14 @@ function updateStats() {
     totalHeatLoss += length * wall.waData.uValue * deltaT;
   });
   
-  // Subtract heat loss for openings (they're gaps in the wall)
+  // Adjust for openings
   openings.forEach(opening => {
     const wall = walls[opening.wallIndex];
     if (wall && wall.waData.mode === 'exterior') {
-      const openingLength = opening.width;
       const originalU = wall.waData.uValue;
       const openingU = opening.type === 'door' ? 2.0 : 1.2;
-      totalHeatLoss -= openingLength * originalU * deltaT;
-      totalHeatLoss += openingLength * openingU * deltaT;
+      totalHeatLoss -= opening.width * originalU * deltaT;
+      totalHeatLoss += opening.width * openingU * deltaT;
     }
   });
   
@@ -484,30 +498,14 @@ function updateStats() {
   document.getElementById('energyScore').textContent = Math.round(score);
   document.getElementById('heatLoss').textContent = `${totalHeatLoss.toFixed(1)} W/K`;
   
-  // Update instructions
+  // Update instructions dynamically
   const instructions = {
-    exterior: [
-      '<li>Select Exterior Wall mode</li>',
-      '<li>Click first grid point</li>',
-      '<li>Click second grid point to place wall</li>'
-    ],
-    interior: [
-      '<li>Select Interior Wall mode</li>',
-      '<li>Click first grid point</li>',
-      '<li>Click second grid point to place wall</li>'
-    ],
-    opening: [
-      '<li>Select Add Opening mode</li>',
-      '<li>Click anywhere on an exterior wall</li>',
-      '<li>Confirm for window, Cancel for door</li>'
-    ],
-    delete: [
-      '<li>Select Delete mode</li>',
-      '<li>Click on a wall or grid point</li>',
-      '<li>Press ESC to cancel deletion mode</li>'
-    ]
+    exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point to place wall'],
+    interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point to place wall'],
+    opening: ['Select Add Opening mode', 'Click on an exterior wall line', 'OK = Window, Cancel = Door'],
+    delete: ['Select Delete mode', 'Click on a wall to remove', 'ESC to exit delete mode']
   };
-  document.getElementById('instructionsText').innerHTML = instructions[currentMode].join('');
+  document.getElementById('instructionsText').innerHTML = instructions[currentMode].map((text, i) => `<li>${text}</li>`).join('');
 }
 
 function getWallLengthMeters(wall) {
@@ -530,8 +528,7 @@ function setupEventListeners() {
   };
   
   document.getElementById('toggle3D').onclick = () => {
-    const sidebar = document.getElementById('three-sidebar');
-    sidebar.classList.toggle('hidden');
+    document.getElementById('three-sidebar').classList.toggle('hidden');
   };
   
   document.getElementById('autoRotate').onchange = (e) => {
@@ -574,7 +571,7 @@ function setupEventListeners() {
   };
   
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && selectedPoint) {
+    if (e.key === 'Escape') {
       selectedPoint = null;
       highlightSelected(null);
     }
