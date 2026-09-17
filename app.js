@@ -1,4 +1,4 @@
-// Segal House Designer - Complete Working Version
+// Segal House Designer - Final Working Version with Visible Openings
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -35,7 +35,6 @@ let rotationAngle = 0;
 
 console.log('🚀 Initializing Segal House Designer...');
 
-// ========== SAFE LINE COORDINATE ACCESS ==========
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) {
     console.error('⚠️ getLinePoints: No wall or fabricObj');
@@ -44,32 +43,19 @@ function getLinePoints(wall) {
   
   const line = wall.fabricObj;
   
-  // Try x1, y1, x2, y2 first (Fabric.js properties)
   if (line.x1 !== undefined && line.y1 !== undefined && 
       line.x2 !== undefined && line.y2 !== undefined) {
-    return {
-      x1: line.x1,
-      y1: line.y1,
-      x2: line.x2,
-      y2: line.y2
-    };
+    return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
   }
   
-  // Fallback: points array
   if (Array.isArray(line.points) && line.points.length >= 4) {
-    return {
-      x1: line.points[0],
-      y1: line.points[1],
-      x2: line.points[2],
-      y2: line.points[3]
-    };
+    return { x1: line.points[0], y1: line.points[1], x2: line.points[2], y2: line.points[3] };
   }
   
   console.error('⚠️ Could not extract line coordinates', line);
   return null;
 }
 
-// ========== INIT ==========
 function initAll() {
   initThree();
   initGridPoints();
@@ -160,7 +146,7 @@ function initThree() {
 }
 
 function renderThreeScene() {
-  console.log('🎨 Rendering 3D scene...');
+  console.log(`🎨 Rendering 3D: ${walls.length} walls, ${openings.length} openings`);
   
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
@@ -186,7 +172,7 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls - use grid coordinates (pointA/pointB), NOT Fabric pixel coordinates
+  // Walls
   walls.forEach((wall, wallIdx) => {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -195,10 +181,12 @@ function renderThreeScene() {
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
     
     const wallMat = new THREE.MeshPhongMaterial({
-      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7
+      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7,
+      transparent: true,
+      opacity: 0.95
     });
     const wallMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(length, WALL_HEIGHT_M, 0.15),
+      new THREE.BoxGeometry(length, WALL_HEIGHT_M, 0.16), // Slightly thicker wall
       wallMat
     );
     wallMesh.position.set(
@@ -210,29 +198,52 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings on this wall
-    openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
-      const ratio = opening.position;
-      const ox = start.x + (end.x - start.x) * ratio;
-      const oz = start.z + (end.z - start.z) * ratio;
-      
-      const openingMat = new THREE.MeshPhongMaterial({
-        color: opening.type === 'door' ? 0xff9800 : 0x4fc3f7
-      });
-      const openingMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(opening.width, opening.type === 'door' ? 2.1 : 1.2, 0.1),
-        openingMat
-      );
-      openingMesh.position.set(
-        ox,
-        opening.type === 'door' ? 1.05 : WALL_HEIGHT_M / 2,
-        oz
-      );
-      openingMesh.rotation.y = -angle;
-      openings3DGroup.add(openingMesh);
-    });
+    console.log(`  Wall ${wallIdx}: ${length.toFixed(2)}m @ ${wall.mode}`);
+  });
+  
+  // Openings - CRITICAL FIX: Render AFTER all walls
+  console.log(`  Processing ${openings.length} openings...`);
+  openings.forEach((opening, openingIdx) => {
+    const wall = walls[opening.wallIndex];
     
-    console.log(`✅ Wall ${wallIdx}: ${length.toFixed(2)}m @ ${wall.mode}`);
+    if (!wall) {
+      console.warn(`⚠️ Opening ${openingIdx} references non-existent wall ${opening.wallIndex}`);
+      return;
+    }
+    
+    const start = gridToWorld(wall.pointA.col, wall.pointA.row);
+    const end = gridToWorld(wall.pointB.col, wall.pointB.row);
+    
+    const ratio = opening.position;
+    const ox = start.x + (end.x - start.x) * ratio;
+    const oz = start.z + (end.z - start.z) * ratio;
+    const angle = Math.atan2(end.z - start.z, end.x - start.x);
+    
+    const openingColor = opening.type === 'door' ? 0xff9800 : 0x00d4ff;
+    const openingHeight = opening.type === 'door' ? 2.1 : 1.4;
+    const openingDepth = 0.08; // Make openings stick out slightly
+    
+    const openingMat = new THREE.MeshPhongMaterial({
+      color: openingColor,
+      emissive: openingColor,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.9
+    });
+    const openingMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(opening.width, openingHeight, openingDepth),
+      openingMat
+    );
+    openingMesh.position.set(
+      ox,
+      opening.type === 'door' ? openingHeight / 2 : WALL_HEIGHT_M / 2,
+      oz
+    );
+    openingMesh.rotation.y = -angle;
+    openingMesh.castShadow = true;
+    openings3DGroup.add(openingMesh);
+    
+    console.log(`  ✅ Opening ${openingIdx}: ${opening.type} (${opening.width}m) on wall ${opening.wallIndex}`);
   });
   
   animate();
@@ -250,7 +261,6 @@ function animate() {
 }
 
 // ========== FABRIC FUNCTIONS ==========
-
 function initGridPoints() {
   for (let c = 0; c <= CANVAS_COLS; c++) {
     for (let r = 0; r <= CANVAS_ROWS; r++) {
@@ -349,25 +359,18 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
 }
 
 function findWallUnderMouse(mx, my, tol = 15) {
-  if (walls.length === 0) {
-    console.log('ℹ️ No walls to check');
-    return null;
-  }
+  if (walls.length === 0) return null;
   
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
     const coords = getLinePoints(wall);
     
-    if (!coords) {
-      console.log(`⚠️ Skipping wall ${i}, invalid coordinates`);
-      continue;
-    }
+    if (!coords) continue;
     
     const closest = getPointOnLine(mx, my, coords.x1, coords.y1, coords.x2, coords.y2);
     const dist = Math.hypot(mx - closest.x, my - closest.y);
     
     if (dist < tol) {
-      console.log(`✅ Wall ${i} detected! Ratio: ${closest.param.toFixed(2)}`);
       return { wallIndex: i, ratio: closest.param };
     }
   }
@@ -413,6 +416,7 @@ function openOpeningDialog(wallResult) {
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
   document.getElementById('openingDialog').classList.add('show');
+  console.log('📋 Opening dialog shown');
 }
 
 function closeOpeningDialog() {
@@ -439,6 +443,7 @@ function createOpening(type) {
   };
   
   openings.push(opening);
+  console.log(`✅ Opening added: ${type} on wall ${opening.wallIndex}`);
   
   closeOpeningDialog();
   drawOpeningMarkers();
@@ -481,7 +486,6 @@ fabricCanvas.on('mouse:down', (opt) => {
     return;
   }
   
-  // Wall drawing mode
   const clickedPoint = getClosestGridPoint(mx, my);
   
   if (!clickedPoint) return;
@@ -558,7 +562,6 @@ function updateStats() {
   document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
 }
 
-// ========== LOAD/SAVE FROM URL ==========
 function loadDesignFromURL() {
   const params = new URLSearchParams(window.location.search);
   const encoded = params.get('design');
@@ -586,7 +589,6 @@ function loadDesign(data) {
     const pointB = gridPoints[wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col];
     
     if (pointA && pointB) {
-      // Temporarily switch mode to create wall correctly
       const oldMode = currentMode;
       currentMode = wallData.mode;
       createWall(pointA, pointB);
