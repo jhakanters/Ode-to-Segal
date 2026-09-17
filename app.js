@@ -1,4 +1,4 @@
-// Segal House Designer - Simplified & Reliable
+// Segal House Designer - Working Version with Custom Modal
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -12,10 +12,11 @@ const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
 // State
 let currentMode = 'exterior';
 let selectedPoint = null;
-let walls = []; // { fabricObj, index, mode, pointA, pointB, uValue }
-let openings = []; // { wallIndex, position, type, width }
+let walls = [];
+let openings = [];
 let gridPoints = [];
 let showGrid = true;
+let pendingOpening = null; // Store wall info when opening modal
 
 // Fabric canvas
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
@@ -64,14 +65,12 @@ function initThree() {
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
   
-  // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
   dirLight.position.set(10, 20, 10);
   dirLight.castShadow = true;
   scene.add(dirLight);
   
-  // Groups
   walls3DGroup = new THREE.Group();
   openings3DGroup = new THREE.Group();
   gridPoints3DGroup = new THREE.Group();
@@ -79,7 +78,6 @@ function initThree() {
   scene.add(openings3DGroup);
   scene.add(gridPoints3DGroup);
   
-  // Ground
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(20, 20),
     new THREE.MeshPhongMaterial({ color: 0xf0f0f0 })
@@ -88,7 +86,6 @@ function initThree() {
   ground.position.y = -0.1;
   scene.add(ground);
   
-  // Orbit controls
   let isDragging = false, prevMouse = { x: 0, y: 0 };
   const canvas3D = renderer.domElement;
   
@@ -120,9 +117,6 @@ function initThree() {
 }
 
 function renderThreeScene() {
-  console.log(`🎨 Rendering 3D: ${walls.length} walls, ${openings.length} openings`);
-  
-  // Clear groups
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
@@ -137,7 +131,6 @@ function renderThreeScene() {
     };
   }
   
-  // Grid points
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
@@ -147,7 +140,6 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls
   walls.forEach((wall, wallIdx) => {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -169,7 +161,6 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings on this wall
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -271,8 +262,7 @@ function createWall(pointA, pointB) {
     uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35)
   };
   
-  line.wallIndex = walls.length; // Store index on Fabric object
-  
+  line.wallIndex = walls.length;
   walls.push(wallData);
   fabricCanvas.add(line);
   fabricCanvas.sendToBack(line);
@@ -282,7 +272,6 @@ function createWall(pointA, pointB) {
   
   updateStats();
   renderThreeScene();
-  console.log('✅ Wall created:', wallData);
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -300,13 +289,6 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
 }
 
 function findWallUnderMouse(mx, my, tol = 12) {
-  const canvasCtx = fabricCanvas.contextContainer;
-  const scaleX = canvasCtx.canvas.width / fabricCanvas.getWidth();
-  const scaleY = canvasCtx.canvas.height / fabricCanvas.getHeight();
-  
-  mx *= scaleX;
-  my *= scaleY;
-  
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
     const line = wall.fabricObj;
@@ -324,13 +306,50 @@ function findWallUnderMouse(mx, my, tol = 12) {
   return null;
 }
 
+// ========== CUSTOM MODAL ==========
+function openOpeningDialog(wallResult) {
+  pendingOpening = wallResult;
+  document.getElementById('openingDialog').classList.add('show');
+  document.getElementById('openingDialog').classList.remove('hidden');
+  console.log('📋 Opening dialog shown for wall:', wallResult);
+}
+
+function closeOpeningDialog() {
+  pendingOpening = null;
+  document.getElementById('openingDialog').classList.remove('show');
+  document.getElementById('openingDialog').classList.add('hidden');
+}
+
+function createOpening(type) {
+  if (!pendingOpening) return;
+  
+  const wall = walls[pendingOpening.wallIndex];
+  if (wall.mode !== 'exterior') {
+    alert('Openings only on exterior walls!');
+    closeOpeningDialog();
+    return;
+  }
+  
+  const opening = {
+    wallIndex: pendingOpening.wallIndex,
+    position: Math.max(0.15, Math.min(0.85, pendingOpening.ratio)),
+    type: type,
+    width: type === 'door' ? 0.9 : 1.5
+  };
+  
+  openings.push(opening);
+  console.log('✅ Opening created:', opening);
+  
+  closeOpeningDialog();
+  updateStats();
+  renderThreeScene();
+}
+
 // ========== MOUSE EVENTS ==========
 
 fabricCanvas.on('mouse:down', (opt) => {
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
-  
-  console.log(`🖱️ Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
     const result = findWallUnderMouse(mx, my, 15);
@@ -339,7 +358,6 @@ fabricCanvas.on('mouse:down', (opt) => {
       const wall = walls[wallIdx];
       fabricCanvas.remove(wall.fabricObj);
       
-      // Remove openings on deleted wall
       openings = openings.filter(o => o.wallIndex !== wallIdx);
       openings = openings.map(o => ({
         ...o,
@@ -351,7 +369,6 @@ fabricCanvas.on('mouse:down', (opt) => {
       
       updateStats();
       renderThreeScene();
-      console.log('❌ Wall deleted');
     }
     return;
   }
@@ -359,31 +376,11 @@ fabricCanvas.on('mouse:down', (opt) => {
   if (currentMode === 'opening') {
     const result = findWallUnderMouse(mx, my, 15);
     if (result) {
-      const wall = walls[result.wallIndex];
-      if (wall.mode !== 'exterior') {
-        alert('Openings only on exterior walls!');
-        return;
-      }
-      
-      const isWindow = confirm('WINDOW? (Cancel for Door)');
-      const opening = {
-        wallIndex: result.wallIndex,
-        position: Math.max(0.15, Math.min(0.85, result.ratio)),
-        type: isWindow ? 'window' : 'door',
-        width: isWindow ? 1.5 : 0.9
-      };
-      
-      openings.push(opening);
-      console.log('✅ Opening added:', opening);
-      
-      updateStats();
-      renderThreeScene();
-      return;
+      openOpeningDialog(result);
     } else {
-      console.log('⚠️ No wall detected at click position');
-      alert('Click directly on a wall line (not grid points)');
-      return;
+      console.log('⚠️ No wall detected');
     }
+    return;
   }
   
   // Wall drawing mode
@@ -457,16 +454,10 @@ function updateStats() {
   const instr = {
     exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point'],
     interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point'],
-    opening: ['Select Add Opening mode', 'Click ON a wall line', 'OK=Window, Cancel=Door'],
+    opening: ['Select Add Opening mode', 'Click ON a wall line', 'Choose window or door'],
     delete: ['Select Delete mode', 'Click on wall/point to remove']
   };
   document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
-}
-
-function getWallLengthMeters(wall) {
-  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
-  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
-  return Math.hypot(dx, dy) / 1000;
 }
 
 function setupEventListeners() {
@@ -511,8 +502,17 @@ function setupEventListeners() {
   };
   
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { selectedPoint = null; highlightSelected(null); }
+    if (e.key === 'Escape') { 
+      selectedPoint = null; 
+      highlightSelected(null);
+      closeOpeningDialog();
+    }
   });
+  
+  // ====== MODAL BUTTON LISTENERS ======
+  document.getElementById('windowBtn').onclick = () => createOpening('window');
+  document.getElementById('doorBtn').onclick = () => createOpening('door');
+  document.getElementById('closeDialog').onclick = closeOpeningDialog;
 }
 
 function setMode(mode) {
