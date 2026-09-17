@@ -1,16 +1,15 @@
-// Segal House Designer - Final Version with Small Windows, Recessed Holes, & Dimensions
+// Segal House Designer - Fixed Version (No drawDimensions error)
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
 const CANVAS_COLS = 12;
 const CANVAS_ROWS = 10;
 const WALL_HEIGHT_M = 2.4;
-const MAX_OPENING_WIDTH = 0.85; // 850mm max to fit in 900mm panel
+const MAX_OPENING_WIDTH = 0.85;
 
 const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
 const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
 
-// State
 let currentMode = 'exterior';
 let selectedPoint = null;
 let walls = [];
@@ -19,7 +18,6 @@ let gridPoints = [];
 let showGrid = true;
 let pendingOpening = null;
 
-// Fabric canvas
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
   width: CANVAS_WIDTH,
   height: CANVAS_HEIGHT,
@@ -28,9 +26,8 @@ const fabricCanvas = new fabric.Canvas('gridCanvas', {
   allowTouchScrolling: false
 });
 
-// Three.js
 let scene, camera, renderer;
-let walls3DGroup, openings3DGroup, gridPoints3DGroup, dimLabelsGroup;
+let walls3DGroup, openings3DGroup, gridPoints3DGroup;
 let autoRotate = true;
 let rotationAngle = 0;
 
@@ -38,7 +35,6 @@ console.log('🚀 Initializing Segal House Designer...');
 
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) return null;
-  
   const line = wall.fabricObj;
   
   if (line.x1 !== undefined && line.y1 !== undefined && 
@@ -61,20 +57,15 @@ function initAll() {
   updateStats();
   renderThreeScene();
   drawOpeningMarkers();
-  drawDimensions();
   loadDesignFromURL();
   console.log('✅ Initialization complete');
 }
 
 initAll();
 
-// ========== THREE.JS ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
-  if (!container) {
-    console.error('❌ 3D container not found!');
-    return;
-  }
+  if (!container) return;
   
   const width = container.clientWidth || 300;
   const height = container.clientHeight || 400;
@@ -100,12 +91,10 @@ function initThree() {
   walls3DGroup = new THREE.Group();
   openings3DGroup = new THREE.Group();
   gridPoints3DGroup = new THREE.Group();
-  dimLabelsGroup = new THREE.Group();
   
   scene.add(walls3DGroup);
   scene.add(openings3DGroup);
   scene.add(gridPoints3DGroup);
-  scene.add(dimLabelsGroup);
   
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(20, 20),
@@ -150,7 +139,6 @@ function renderThreeScene() {
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
-  while(dimLabelsGroup.children.length) dimLabelsGroup.remove(dimLabelsGroup.children[0]);
   
   const cx = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   const cz = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
@@ -162,7 +150,6 @@ function renderThreeScene() {
     };
   }
   
-  // Grid points
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
@@ -172,7 +159,6 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls
   walls.forEach((wall, wallIdx) => {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -196,7 +182,6 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings - RECESSED HOLES (not protruding)
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -205,10 +190,6 @@ function renderThreeScene() {
       const openingColor = opening.type === 'door' ? 0xff9800 : 0x00d4ff;
       const openingHeight = opening.type === 'door' ? 2.1 : 1.4;
       
-      // OPENINGS AS RECESSED HOLES:
-      // - Slightly negative depth (sits inside wall surface)
-      // - Darker color to look like void
-      // - Lower opacity
       const openingMat = new THREE.MeshPhongMaterial({
         color: openingColor,
         emissive: 0x000000,
@@ -217,7 +198,7 @@ function renderThreeScene() {
         shininess: 0
       });
       const openingMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(opening.width, openingHeight, 0.16), // Same depth as wall
+        new THREE.BoxGeometry(opening.width, openingHeight, 0.16),
         openingMat
       );
       openingMesh.position.set(
@@ -226,36 +207,12 @@ function renderThreeScene() {
         oz
       );
       openingMesh.rotation.y = -angle;
-      // Push opening slightly INTO the wall (negative Z offset)
       openingMesh.position.z -= 0.01;
       openings3DGroup.add(openingMesh);
     });
   });
   
-  // Dimension labels
-  draw3DDimensions();
-  
   animate();
-}
-
-function draw3DDimensions() {
-  // This is tricky in Three.js - using sprites for text
-  // For now, just add a simple text mesh at origin
-  
-  // Create dimension label sprite for each wall
-  walls.forEach((wall, i) => {
-    const start = gridToWorld(wall.pointA.col, wall.pointA.row);
-    const end = gridToWorld(wall.pointB.col, wall.pointB.row);
-    const length = Math.hypot(end.x - start.x, end.z - start.z);
-    
-    // Simple label position (midpoint, slightly above wall)
-    const labelX = (start.x + end.x) / 2;
-    const labelZ = (start.z + end.z) / 2;
-    const labelY = WALL_HEIGHT_M + 0.3;
-    
-    // For simplicity, we'll skip 3D text (requires FontLoader)
-    // Instead, store dimensions in a UI tooltip or console log
-  });
 }
 
 function animate() {
@@ -269,7 +226,6 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ========== FABRIC FUNCTIONS ==========
 function initGridPoints() {
   for (let c = 0; c <= CANVAS_COLS; c++) {
     for (let r = 0; r <= CANVAS_ROWS; r++) {
@@ -308,30 +264,21 @@ function drawGridLines() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
   }
   
-  // Draw dimension labels on 2D grid
-  drawDimensionLabels();
-}
-
-function drawDimensionLabels() {
-  const ctx = fabricCanvas.getContext();
+  // Column numbers at top
   ctx.font = 'bold 10px Arial';
   ctx.fillStyle = '#666';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   
-  // Column numbers at top
   for (let c = 0; c <= CANVAS_COLS; c++) {
     const x = c * GRID_PIXEL_SIZE;
     ctx.fillText(`${c}`, x, 5);
   }
   
-  // Row numbers at left
   for (let r = 0; r <= CANVAS_ROWS; r++) {
     const y = r * GRID_PIXEL_SIZE;
     ctx.fillText(`${r}`, 5, y);
   }
-  
-  // Measure wall lengths on hover/click (optional enhancement)
 }
 
 function getClosestGridPoint(x, y, tol = 20) {
@@ -373,7 +320,7 @@ function createWall(pointA, pointB) {
   selectedPoint = null;
   highlightSelected(null);
   drawOpeningMarkers();
-  drawGridLines(); // Redraw with dimensions
+  drawGridLines();
   
   updateStats();
   renderThreeScene();
@@ -417,7 +364,7 @@ function drawOpeningMarkers() {
     .filter(o => o.isOpeningMarker)
     .forEach(o => fabricCanvas.remove(o));
   
-  openings.forEach((opening, idx) => {
+  openings.forEach((opening) => {
     const wall = walls[opening.wallIndex];
     const coords = getLinePoints(wall);
     if (!coords) return;
@@ -445,7 +392,6 @@ function drawOpeningMarkers() {
   fabricCanvas.requestRenderAll();
 }
 
-// ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
@@ -468,8 +414,7 @@ function createOpening(type) {
     return;
   }
   
-  // Reduced opening sizes to fit within 900mm panel
-  const openingWidth = type === 'door' ? 0.85 : 0.85; // Both 850mm max
+  const openingWidth = 0.85;
   
   const opening = {
     wallIndex: pendingOpening.wallIndex,
@@ -486,7 +431,6 @@ function createOpening(type) {
   renderThreeScene();
 }
 
-// ========== MOUSE EVENTS ==========
 fabricCanvas.on('mouse:down', (opt) => {
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
@@ -633,7 +577,6 @@ function loadDesign(data) {
     }
   });
   
-  // Update existing openings to new max width
   data.openings.forEach(o => {
     openings.push({
       ...o,
@@ -647,7 +590,6 @@ function loadDesign(data) {
   renderThreeScene();
 }
 
-// ========== EVENT LISTENERS ==========
 function setupEventListeners() {
   document.getElementById('modeExterior').onclick = () => setMode('exterior');
   document.getElementById('modeInterior').onclick = () => setMode('interior');
@@ -716,18 +658,3 @@ function setMode(mode) {
   highlightSelected(null);
   updateStats();
 }
-
-// After drawing grid numbers
-ctx.font = 'bold 11px Arial';
-ctx.fillStyle = '#6d4aff';
-
-walls.forEach(wall => {
-  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
-  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
-  const len = Math.hypot(dx, dy) / 1000;
-  
-  const midX = (wall.pointA.left + wall.pointB.left) / 2;
-  const midY = (wall.pointA.top + wall.pointB.top) / 2;
-  
-  ctx.fillText(`${len.toFixed(1)}m`, midX, midY);
-});
