@@ -10,7 +10,7 @@
   <div id="app">
     <header>
       <h1>🏠 Segal House Designer</h1>
-      <p>Draw your home on a 900mm modular grid • Click two points to place walls</p>
+      <p>Draw your home on a 900mm modular grid • Click walls to add windows/doors</p>
     </header>
     
     <div class="toolbar">
@@ -18,20 +18,13 @@
         <span class="mode-label">Mode:</span>
         <button id="modeExterior" class="mode-btn active">🧱 Exterior Wall</button>
         <button id="modeInterior" class="mode-btn">🔲 Interior Wall</button>
+        <button id="modeOpening" class="mode-btn">🪟 Add Opening</button>
         <button id="modeDelete" class="mode-btn">❌ Delete</button>
-      </div>
-      
-      <div class="insulation-group">
-        <label>Insulation:</label>
-        <select id="insulationLevel">
-          <option value="0.18">High (U=0.18)</option>
-          <option value="0.35" selected>Standard (U=0.35)</option>
-          <option value="0.90">Low (U=0.90)</option>
-        </select>
       </div>
       
       <div class="action-group">
         <button id="toggleGrid" class="secondary">📐 Toggle Grid</button>
+        <button id="toggle3D" class="secondary">🔄 Toggle 3D</button>
         <button id="clearAll" class="danger">🗑️ Clear All</button>
         <button id="exportDesign" class="secondary">💾 Export</button>
       </div>
@@ -41,11 +34,10 @@
       <aside id="sidebar">
         <section class="sidebar-section">
           <h3>Instructions</h3>
-          <ol>
-            <li>Select a mode (Exterior/Interior/Delete)</li>
+          <ol id="instructionsText">
+            <li>Select Exterior/Interior Wall mode</li>
             <li>Click first grid point</li>
             <li>Click second grid point to place wall</li>
-            <li>Press ESC or click another point to cancel</li>
           </ol>
         </section>
         
@@ -62,6 +54,10 @@
           <div class="stat-row">
             <span>Interior walls:</span>
             <span id="interiorLength">0 m</span>
+          </div>
+          <div class="stat-row">
+            <span>Openings:</span>
+            <span id="openingCount">0</span>
           </div>
           <div class="stat-row">
             <span>Energy score:</span>
@@ -82,6 +78,9 @@
             <span class="swatch interior"></span> Interior wall
           </div>
           <div class="legend-item">
+            <span class="dot opening"></span> Opening (window/door)
+          </div>
+          <div class="legend-item">
             <span class="dot point"></span> Grid point
           </div>
         </section>
@@ -91,6 +90,14 @@
         <canvas id="gridCanvas"></canvas>
         <div id="cursor-follow" class="cursor-follow"></div>
       </main>
+      
+      <aside id="three-container" class="three-sidebar">
+        <div id="three-canvas"></div>
+        <div class="three-controls">
+          <label><input type="checkbox" id="autoRotate" checked> Auto-rotate</label>
+          <p>Drag to rotate • Scroll to zoom</p>
+        </div>
+      </aside>
     </div>
     
     <footer>
@@ -99,6 +106,7 @@
   </div>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
