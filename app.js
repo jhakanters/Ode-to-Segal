@@ -1,19 +1,19 @@
-// Segal House Designer - Main Logic with 3D Preview
-const MODULE_SIZE = 900; // 900mm real-world
-const PIXEL_PER_MM = 0.1; // 1:10 scale
-const GRID_PIXEL_SIZE = MODULE_SIZE * PIXEL_PER_MM; // 90px
+// Segal House Designer - Simplified & Reliable
+const MODULE_SIZE = 900;
+const PIXEL_PER_MM = 0.1;
+const GRID_PIXEL_SIZE = 90;
 const CANVAS_COLS = 12;
 const CANVAS_ROWS = 10;
+const WALL_HEIGHT_M = 2.4;
 
 const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
 const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
-const WALL_HEIGHT_M = 2.4; // 2.4m ceiling height
 
 // State
 let currentMode = 'exterior';
 let selectedPoint = null;
-let walls = [];
-let openings = [];
+let walls = []; // { fabricObj, index, mode, pointA, pointB, uValue }
+let openings = []; // { wallIndex, position, type, width }
 let gridPoints = [];
 let showGrid = true;
 
@@ -25,14 +25,13 @@ const fabricCanvas = new fabric.Canvas('gridCanvas', {
   selection: false
 });
 
-// Three.js variables
+// Three.js
 let scene, camera, renderer;
 let walls3DGroup, openings3DGroup, gridPoints3DGroup;
 let autoRotate = true;
 let rotationAngle = 0;
 
-// ========== INITIALIZATION ==========
-
+// ========== INIT ==========
 initThree();
 initGridPoints();
 drawGridLines();
@@ -40,36 +39,37 @@ setupEventListeners();
 updateStats();
 renderThreeScene();
 
-// ========== THREE.JS 3D PREVIEW ==========
+console.log('✓ Segal House Designer initialized');
 
+// ========== THREE.JS ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
+  if (!container) {
+    console.error('3D container not found!');
+    return;
+  }
+  
   const width = container.clientWidth || 300;
   const height = container.clientHeight || 400;
   
-  // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe8e8e8);
   
-  // Camera
   camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
   camera.position.set(15, 15, 15);
   camera.lookAt(0, 1, 0);
   
-  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
   
-  // Lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambientLight);
-  
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(10, 20, 10);
-  directionalLight.castShadow = true;
-  scene.add(directionalLight);
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(10, 20, 10);
+  dirLight.castShadow = true;
+  scene.add(dirLight);
   
   // Groups
   walls3DGroup = new THREE.Group();
@@ -79,125 +79,115 @@ function initThree() {
   scene.add(openings3DGroup);
   scene.add(gridPoints3DGroup);
   
-  // Ground plane
-  const groundGeometry = new THREE.PlaneGeometry(20, 20);
-  const groundMaterial = new THREE.MeshPhongMaterial({ color: 0xf0f0f0, side: THREE.DoubleSide });
-  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20),
+    new THREE.MeshPhongMaterial({ color: 0xf0f0f0 })
+  );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.1;
   scene.add(ground);
   
   // Orbit controls
-  let isDragging = false;
-  let previousMousePosition = { x: 0, y: 0 };
-  
+  let isDragging = false, prevMouse = { x: 0, y: 0 };
   const canvas3D = renderer.domElement;
   
   canvas3D.addEventListener('mousedown', () => isDragging = true);
   canvas3D.addEventListener('mouseup', () => isDragging = false);
-  canvas3D.addEventListener('mouseleave', () => isDragging = false);
   canvas3D.addEventListener('mousemove', (e) => {
     if (isDragging) {
-      const deltaMove = { x: e.offsetX - previousMousePosition.x, y: e.offsetY - previousMousePosition.y };
-      rotationAngle += deltaMove.x * 0.01;
+      rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
       camera.position.x = Math.sin(rotationAngle) * 15;
       camera.position.z = Math.cos(rotationAngle) * 15;
       camera.lookAt(0, 1, 0);
     }
-    previousMousePosition = { x: e.offsetX, y: e.offsetY };
+    prevMouse = { x: e.offsetX, y: e.offsetY };
   });
   
   canvas3D.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const zoomSpeed = 0.01;
-    camera.position.multiplyScalar(1 + e.deltaY * zoomSpeed);
-    camera.lookAt(0, 1, 0);
+    camera.position.multiplyScalar(1 + e.deltaY * 0.01);
   });
   
   window.addEventListener('resize', () => {
-    const container = document.getElementById('three-canvas');
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    camera.aspect = width / height;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
+    renderer.setSize(w, h);
     renderThreeScene();
   });
 }
 
 function renderThreeScene() {
-  // Clear existing meshes
-  while(walls3DGroup.children.length > 0) walls3DGroup.remove(walls3DGroup.children[0]);
-  while(openings3DGroup.children.length > 0) openings3DGroup.remove(openings3DGroup.children[0]);
-  while(gridPoints3DGroup.children.length > 0) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
+  console.log(`🎨 Rendering 3D: ${walls.length} walls, ${openings.length} openings`);
   
-  // Center offset for 3D world
-  const centerX = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
-  const centerZ = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
+  // Clear groups
+  while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
+  while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
+  while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
+  
+  const cx = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
+  const cz = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   
   function gridToWorld(col, row) {
     return {
-      x: col * MODULE_SIZE / 1000 - centerX,
-      z: (CANVAS_ROWS - row) * MODULE_SIZE / 1000 - centerZ
+      x: col * MODULE_SIZE / 1000 - cx,
+      z: (CANVAS_ROWS - row) * MODULE_SIZE / 1000 - cz
     };
   }
   
-  // Render grid points
+  // Grid points
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
     const pos = gridToWorld(p.gridData.col, p.gridData.row);
-    const sphere = new THREE.Mesh(pointGeo, pointMat.clone());
-    sphere.position.set(pos.x, 0, pos.z);
-    gridPoints3DGroup.add(sphere);
+    const mesh = new THREE.Mesh(pointGeo, pointMat.clone());
+    mesh.position.set(pos.x, 0, pos.z);
+    gridPoints3DGroup.add(mesh);
   });
   
-  // Render walls and openings
-  walls.forEach((wall, wallIndex) => {
-    const start = gridToWorld(wall.waData.pointA.col, wall.waData.pointA.row);
-    const end = gridToWorld(wall.waData.pointB.col, wall.waData.pointB.row);
+  // Walls
+  walls.forEach((wall, wallIdx) => {
+    const start = gridToWorld(wall.pointA.col, wall.pointA.row);
+    const end = gridToWorld(wall.pointB.col, wall.pointB.row);
     
-    const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2));
+    const length = Math.hypot(end.x - start.x, end.z - start.z);
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
     
-    // Wall mesh
-    const wallColor = wall.waData.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7;
-    const wallGeometry = new THREE.BoxGeometry(length, WALL_HEIGHT_M, 0.15);
-    const wallMaterial = new THREE.MeshPhongMaterial({ color: wallColor });
-    const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
-    
+    const wallMat = new THREE.MeshPhongMaterial({
+      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7
+    });
+    const wallMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(length, WALL_HEIGHT_M, 0.15),
+      wallMat
+    );
     wallMesh.position.set(
-      (start.x + end.x) / 2,
-      WALL_HEIGHT_M / 2,
-      (start.z + end.z) / 2
+      (start.x + end.x) / 2, WALL_HEIGHT_M / 2, (start.z + end.z) / 2
     );
     wallMesh.rotation.y = -angle;
     wallMesh.castShadow = true;
-    wallMesh.receiveShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Render openings on this wall
-    const wallOpenings = openings.filter(o => o.wallIndex === wallIndex);
-    wallOpenings.forEach(opening => {
-      const openingColor = opening.type === 'door' ? 0xff9800 : 0x4fc3f7;
-      const openingHeight = opening.type === 'door' ? 2.1 : 1.2;
+    // Openings on this wall
+    openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
+      const ratio = opening.position;
+      const ox = start.x + (end.x - start.x) * ratio;
+      const oz = start.z + (end.z - start.z) * ratio;
       
-      const openingGeo = new THREE.BoxGeometry(opening.width, openingHeight, 0.1);
-      const openingMat = new THREE.MeshPhongMaterial({ color: openingColor });
-      const openingMesh = new THREE.Mesh(openingGeo, openingMat);
-      
-      // Position opening along wall (ratio 0-1)
-      const openingRatio = opening.position;
-      const openingX = start.x + (end.x - start.x) * openingRatio;
-      const openingZ = start.z + (end.z - start.z) * openingRatio;
-      
+      const openingMat = new THREE.MeshPhongMaterial({
+        color: opening.type === 'door' ? 0xff9800 : 0x4fc3f7
+      });
+      const openingMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(opening.width, opening.type === 'door' ? 2.1 : 1.2, 0.1),
+        openingMat
+      );
       openingMesh.position.set(
-        openingX,
-        opening.type === 'door' ? openingHeight / 2 : WALL_HEIGHT_M / 2,
-        openingZ
+        ox,
+        opening.type === 'door' ? 1.05 : WALL_HEIGHT_M / 2,
+        oz
       );
       openingMesh.rotation.y = -angle;
-      
       openings3DGroup.add(openingMesh);
     });
   });
@@ -207,29 +197,24 @@ function renderThreeScene() {
 
 function animate() {
   requestAnimationFrame(animate);
-  
   if (autoRotate) {
     rotationAngle += 0.005;
     camera.position.x = Math.sin(rotationAngle) * 15;
     camera.position.z = Math.cos(rotationAngle) * 15;
     camera.lookAt(0, 1, 0);
   }
-  
   renderer.render(scene, camera);
 }
 
-// ========== FABRIC CANVAS FUNCTIONS ==========
+// ========== FABRIC FUNCTIONS ==========
 
 function initGridPoints() {
-  for (let col = 0; col <= CANVAS_COLS; col++) {
-    for (let row = 0; row <= CANVAS_ROWS; row++) {
-      const x = col * GRID_PIXEL_SIZE;
-      const y = row * GRID_PIXEL_SIZE;
-      
+  for (let c = 0; c <= CANVAS_COLS; c++) {
+    for (let r = 0; r <= CANVAS_ROWS; r++) {
       const point = new fabric.Circle({
-        left: x,
-        top: y,
-        radius: 4,
+        left: c * GRID_PIXEL_SIZE,
+        top: r * GRID_PIXEL_SIZE,
+        radius: 5,
         fill: '#28a745',
         originX: 'center',
         originY: 'center',
@@ -237,8 +222,7 @@ function initGridPoints() {
         hasControls: false,
         hasBorders: false
       });
-      
-      point.gridData = { col, row };
+      point.gridData = { col: c, row: r };
       gridPoints.push(point);
       fabricCanvas.add(point);
     }
@@ -252,30 +236,18 @@ function drawGridLines() {
   ctx.strokeStyle = '#e0e0e0';
   ctx.lineWidth = 1;
   
-  for (let col = 0; col <= CANVAS_COLS; col++) {
-    const x = col * GRID_PIXEL_SIZE;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, CANVAS_HEIGHT);
-    ctx.stroke();
+  for (let c = 0; c <= CANVAS_COLS; c++) {
+    const x = c * GRID_PIXEL_SIZE;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_HEIGHT); ctx.stroke();
   }
-  
-  for (let row = 0; row <= CANVAS_ROWS; row++) {
-    const y = row * GRID_PIXEL_SIZE;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(CANVAS_WIDTH, y);
-    ctx.stroke();
+  for (let r = 0; r <= CANVAS_ROWS; r++) {
+    const y = r * GRID_PIXEL_SIZE;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
   }
 }
 
-function findClosestPoint(x, y) {
-  const tolerance = 20;
-  return gridPoints.find(p => {
-    const dx = Math.abs(p.left - x);
-    const dy = Math.abs(p.top - y);
-    return dx < tolerance && dy < tolerance;
-  });
+function getClosestGridPoint(x, y, tol = 20) {
+  return gridPoints.find(p => Math.hypot(p.left - x, p.top - y) < tol);
 }
 
 function createWall(pointA, pointB) {
@@ -284,24 +256,24 @@ function createWall(pointA, pointB) {
     pointB.left, pointB.top
   ], {
     stroke: currentMode === 'exterior' ? '#6d4aff' : '#4fc3f7',
-    strokeWidth: 6,
+    strokeWidth: 8,
     selectable: true,
-    evented: true,
-    strokeLinecap: 'round'
+    strokeCap: 'round',
+    hoverCursor: 'pointer'
   });
   
-  line.waData = {
+  const wallData = {
+    fabricObj: line,
+    index: walls.length,
     mode: currentMode,
     pointA: pointA.gridData,
     pointB: pointB.gridData,
-    uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35),
-    id: `wall-${walls.length}-${Date.now()}`
+    uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35)
   };
   
-  // Store wall index for opening references
-  line.waData.index = walls.length;
+  line.wallIndex = walls.length; // Store index on Fabric object
   
-  walls.push(line);
+  walls.push(wallData);
   fabricCanvas.add(line);
   fabricCanvas.sendToBack(line);
   
@@ -310,72 +282,114 @@ function createWall(pointA, pointB) {
   
   updateStats();
   renderThreeScene();
+  console.log('✅ Wall created:', wallData);
 }
 
-// ========== MOUSE HANDLER WITH OPENING DETECTION ==========
-
-fabricCanvas.on('mouse:down', function(opt) {
-  const evt = opt.e;
-  const pointer = fabricCanvas.getPointer(evt);
-  const mouseX = pointer.x;
-  const mouseY = pointer.y;
+function getPointOnLine(px, py, x1, y1, x2, y2) {
+  const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  const param = lenSq !== 0 ? dot / lenSq : 0;
   
-  console.log('Mode:', currentMode, 'Click at:', mouseX, mouseY);
+  let xx, yy;
+  if (param < 0) { xx = x1; yy = y1; }
+  else if (param > 1) { xx = x2; yy = y2; }
+  else { xx = x1 + param * C; yy = y1 + param * D; }
+  
+  return { x: xx, y: yy, param };
+}
+
+function findWallUnderMouse(mx, my, tol = 12) {
+  const canvasCtx = fabricCanvas.contextContainer;
+  const scaleX = canvasCtx.canvas.width / fabricCanvas.getWidth();
+  const scaleY = canvasCtx.canvas.height / fabricCanvas.getHeight();
+  
+  mx *= scaleX;
+  my *= scaleY;
+  
+  for (let i = 0; i < walls.length; i++) {
+    const wall = walls[i];
+    const line = wall.fabricObj;
+    
+    const p1 = { x: line.points[0], y: line.points[1] };
+    const p2 = { x: line.points[2], y: line.points[3] };
+    
+    const closest = getPointOnLine(mx, my, p1.x, p1.y, p2.x, p2.y);
+    const dist = Math.hypot(mx - closest.x, my - closest.y);
+    
+    if (dist < tol) {
+      return { wallIndex: i, ratio: closest.param };
+    }
+  }
+  return null;
+}
+
+// ========== MOUSE EVENTS ==========
+
+fabricCanvas.on('mouse:down', (opt) => {
+  const pointer = fabricCanvas.getPointer(opt.e);
+  const mx = pointer.x, my = pointer.y;
+  
+  console.log(`🖱️ Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
-    // Delete wall by clicking near endpoints
-    const nearbyWall = findNearbyWall(mouseX, mouseY, 20);
-    if (nearbyWall !== null) {
-      const wallToRemove = walls[nearbyWall];
-      // Remove all openings on this wall
-      openings = openings.filter(o => o.wallIndex !== nearbyWall);
-      // Renumber remaining openings
+    const result = findWallUnderMouse(mx, my, 15);
+    if (result) {
+      const wallIdx = result.wallIndex;
+      const wall = walls[wallIdx];
+      fabricCanvas.remove(wall.fabricObj);
+      
+      // Remove openings on deleted wall
+      openings = openings.filter(o => o.wallIndex !== wallIdx);
       openings = openings.map(o => ({
         ...o,
-        wallIndex: o.wallIndex > nearbyWall ? o.wallIndex - 1 : o.wallIndex
+        wallIndex: o.wallIndex > wallIdx ? o.wallIndex - 1 : o.wallIndex
       }));
       
-      fabricCanvas.remove(wallToRemove);
-      walls.splice(nearbyWall, 1);
+      walls.splice(wallIdx, 1);
+      walls.forEach((w, idx) => w.index = idx);
+      
       updateStats();
       renderThreeScene();
+      console.log('❌ Wall deleted');
     }
     return;
   }
   
   if (currentMode === 'opening') {
-    // Check if clicking on any exterior wall
-    const clickedWall = findClickOnWall(mouseX, mouseY, 15);
-    if (clickedWall !== null) {
-      const wall = walls[clickedWall.index];
-      if (wall.waData.mode !== 'exterior') {
-        alert('Openings can only be added to exterior walls.');
+    const result = findWallUnderMouse(mx, my, 15);
+    if (result) {
+      const wall = walls[result.wallIndex];
+      if (wall.mode !== 'exterior') {
+        alert('Openings only on exterior walls!');
         return;
       }
       
-      // Confirm opening type
-      const confirmWindow = confirm('OK for WINDOW\nCancel for DOOR');
-      const openingType = confirmWindow ? 'window' : 'door';
-      const openingWidth = openingType === 'door' ? 0.9 : 1.5;
+      const isWindow = confirm('WINDOW? (Cancel for Door)');
+      const opening = {
+        wallIndex: result.wallIndex,
+        position: Math.max(0.15, Math.min(0.85, result.ratio)),
+        type: isWindow ? 'window' : 'door',
+        width: isWindow ? 1.5 : 0.9
+      };
       
-      openings.push({
-        wallIndex: clickedWall.index,
-        position: clickedWall.ratio,
-        type: openingType,
-        width: openingWidth
-      });
-      
-      console.log('Opening added:', openings[opens.length - 1]);
+      openings.push(opening);
+      console.log('✅ Opening added:', opening);
       
       updateStats();
       renderThreeScene();
       return;
+    } else {
+      console.log('⚠️ No wall detected at click position');
+      alert('Click directly on a wall line (not grid points)');
+      return;
     }
-    return;
   }
   
-  // Normal wall drawing mode
-  const clickedPoint = findClosestPoint(mouseX, mouseY);
+  // Wall drawing mode
+  const clickedPoint = getClosestGridPoint(mx, my);
+  
+  if (!clickedPoint) return;
   
   if (!selectedPoint) {
     selectedPoint = clickedPoint;
@@ -388,130 +402,71 @@ fabricCanvas.on('mouse:down', function(opt) {
   }
 });
 
-// Find closest wall to a point (within tolerance)
-function findNearbyWall(x, y, tolerance) {
-  for (let i = 0; i < walls.length; i++) {
-    const wall = walls[i];
-    const dist = pointLineDistance(x, y, wall.points[0], wall.points[1], wall.points[2], wall.points[3]);
-    if (dist < tolerance) return i;
+fabricCanvas.on('mouse:move', (opt) => {
+  if (currentMode === 'opening') {
+    const pointer = fabricCanvas.getPointer(opt.e);
+    const result = findWallUnderMouse(pointer.x, pointer.y, 15);
+    fabricCanvas.defaultCursor = result ? 'pointer' : 'crosshair';
   }
-  return null;
-}
-
-// Detect if mouse click is ON a wall line
-function findClickOnWall(x, y, tolerance) {
-  for (let i = 0; i < walls.length; i++) {
-    const wall = walls[i];
-    const dist = pointLineDistance(x, y, wall.points[0], wall.points[1], wall.points[2], wall.points[3]);
-    
-    if (dist < tolerance) {
-      // Calculate ratio along the wall (0 to 1)
-      const wallLenSq = Math.pow(wall.points[2] - wall.points[0], 2) + Math.pow(wall.points[3] - wall.points[1], 2);
-      const distFromStartSq = Math.pow(x - wall.points[0], 2) + Math.pow(y - wall.points[1], 2);
-      const wallLen = Math.sqrt(wallLenSq);
-      const distFromStart = Math.sqrt(distFromStartSq);
-      let ratio = wallLen > 0 ? distFromStart / wallLen : 0.5;
-      
-      // Clamp between 0.1 and 0.9 to prevent openings at exact endpoints
-      ratio = Math.max(0.1, Math.min(0.9, ratio));
-      
-      return { index: i, ratio };
-    }
-  }
-  return null;
-}
-
-function pointLineDistance(px, py, x1, y1, x2, y2) {
-  const A = px - x1;
-  const B = py - y1;
-  const C = x2 - x1;
-  const D = y2 - y1;
-  
-  const dot = A * C + B * D;
-  const len_sq = C * C + D * D;
-  let param = -1;
-  
-  if (len_sq !== 0) param = dot / len_sq;
-  
-  let xx, yy;
-  
-  if (param < 0) {
-    xx = x1;
-    yy = y1;
-  } else if (param > 1) {
-    xx = x2;
-    yy = y2;
-  } else {
-    xx = x1 + param * C;
-    yy = y1 + param * D;
-  }
-  
-  const dx = px - xx;
-  const dy = py - yy;
-  return Math.sqrt(dx * dx + dy * dy);
-}
+});
 
 function highlightSelected(point) {
   gridPoints.forEach(p => {
-    p.set('fill', p === selectedPoint ? '#ff6b6b' : '#28a745');
+    p.fill = (p === selectedPoint) ? '#ff6b6b' : '#28a745';
   });
   fabricCanvas.requestRenderAll();
 }
 
 function updateStats() {
-  let exteriorLength = 0;
-  let interiorLength = 0;
-  let totalLength = 0;
-  let totalHeatLoss = 0;
+  let extLen = 0, intLen = 0, totalLen = 0, heatLoss = 0;
   const deltaT = 15;
   
   walls.forEach(wall => {
-    const length = getWallLengthMeters(wall);
-    totalLength += length;
+    const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
+    const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
+    const len = Math.hypot(dx, dy) / 1000;
+    totalLen += len;
     
-    if (wall.waData.mode === 'exterior') {
-      exteriorLength += length;
+    if (wall.mode === 'exterior') {
+      extLen += len;
+      heatLoss += len * wall.uValue * deltaT;
     } else {
-      interiorLength += length;
+      intLen += len;
     }
-    
-    totalHeatLoss += length * wall.waData.uValue * deltaT;
   });
   
-  // Adjust for openings
   openings.forEach(opening => {
     const wall = walls[opening.wallIndex];
-    if (wall && wall.waData.mode === 'exterior') {
-      const originalU = wall.waData.uValue;
+    if (wall?.mode === 'exterior') {
+      const wallU = wall.uValue;
       const openingU = opening.type === 'door' ? 2.0 : 1.2;
-      totalHeatLoss -= opening.width * originalU * deltaT;
-      totalHeatLoss += opening.width * openingU * deltaT;
+      heatLoss -= opening.width * wallU * deltaT;
+      heatLoss += opening.width * openingU * deltaT;
     }
   });
   
-  const score = Math.max(0, 100 - (totalHeatLoss * 0.5));
+  const score = Math.max(0, 100 - heatLoss * 0.5);
   
-  document.getElementById('totalLength').textContent = `${totalLength.toFixed(1)} m`;
-  document.getElementById('exteriorLength').textContent = `${exteriorLength.toFixed(1)} m`;
-  document.getElementById('interiorLength').textContent = `${interiorLength.toFixed(1)} m`;
+  document.getElementById('totalLength').textContent = `${totalLen.toFixed(1)} m`;
+  document.getElementById('exteriorLength').textContent = `${extLen.toFixed(1)} m`;
+  document.getElementById('interiorLength').textContent = `${intLen.toFixed(1)} m`;
   document.getElementById('openingCount').textContent = openings.length;
   document.getElementById('energyScore').textContent = Math.round(score);
-  document.getElementById('heatLoss').textContent = `${totalHeatLoss.toFixed(1)} W/K`;
+  document.getElementById('heatLoss').textContent = `${heatLoss.toFixed(1)} W/K`;
   
-  // Update instructions dynamically
-  const instructions = {
-    exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point to place wall'],
-    interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point to place wall'],
-    opening: ['Select Add Opening mode', 'Click on an exterior wall line', 'OK = Window, Cancel = Door'],
-    delete: ['Select Delete mode', 'Click on a wall to remove', 'ESC to exit delete mode']
+  const instr = {
+    exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point'],
+    interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point'],
+    opening: ['Select Add Opening mode', 'Click ON a wall line', 'OK=Window, Cancel=Door'],
+    delete: ['Select Delete mode', 'Click on wall/point to remove']
   };
-  document.getElementById('instructionsText').innerHTML = instructions[currentMode].map((text, i) => `<li>${text}</li>`).join('');
+  document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
 }
 
 function getWallLengthMeters(wall) {
-  const dx = Math.abs(wall.waData.pointA.col - wall.waData.pointB.col) * MODULE_SIZE;
-  const dy = Math.abs(wall.waData.pointA.row - wall.waData.pointB.row) * MODULE_SIZE;
-  return Math.sqrt(dx * dx + dy * dy) / 1000;
+  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
+  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
+  return Math.hypot(dx, dy) / 1000;
 }
 
 function setupEventListeners() {
@@ -523,7 +478,7 @@ function setupEventListeners() {
   document.getElementById('toggleGrid').onclick = () => {
     showGrid = !showGrid;
     fabricCanvas.backgroundColor = showGrid ? '#fafafa' : '#ffffff';
-    gridPoints.forEach(p => p.set('visible', showGrid));
+    gridPoints.forEach(p => p.visible = showGrid);
     fabricCanvas.requestRenderAll();
   };
   
@@ -531,63 +486,38 @@ function setupEventListeners() {
     document.getElementById('three-sidebar').classList.toggle('hidden');
   };
   
-  document.getElementById('autoRotate').onchange = (e) => {
-    autoRotate = e.target.checked;
-  };
+  document.getElementById('autoRotate').onchange = (e) => autoRotate = e.target.checked;
   
   document.getElementById('clearAll').onclick = () => {
-    if (confirm('Clear all walls and openings?')) {
-      walls.forEach(w => fabricCanvas.remove(w));
-      walls = [];
-      openings = [];
-      selectedPoint = null;
+    if (confirm('Clear everything?')) {
+      walls.forEach(w => fabricCanvas.remove(w.fabricObj));
+      walls = []; openings = []; selectedPoint = null;
       highlightSelected(null);
-      updateStats();
-      renderThreeScene();
+      updateStats(); renderThreeScene();
     }
   };
   
   document.getElementById('exportDesign').onclick = () => {
     const data = {
-      walls: walls.map(w => ({
-        mode: w.waData.mode,
-        pointA: w.waData.pointA,
-        pointB: w.waData.pointB,
-        uValue: w.waData.uValue
-      })),
+      walls: walls.map(w => ({ mode: w.mode, pointA: w.pointA, pointB: w.pointB, uValue: w.uValue })),
       openings: openings,
-      timestamp: Date.now(),
-      gridSize: { cols: CANVAS_COLS, rows: CANVAS_ROWS },
-      moduleSize: MODULE_SIZE
+      timestamp: Date.now()
     };
-    
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `segal-design-${Date.now()}.json`;
+    a.href = URL.createObjectURL(blob);
+    a.download = `segal-${Date.now()}.json`;
     a.click();
   };
   
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      selectedPoint = null;
-      highlightSelected(null);
-    }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { selectedPoint = null; highlightSelected(null); }
   });
 }
 
 function setMode(mode) {
   currentMode = mode;
-  
-  document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
-  
-  selectedPoint = null;
-  highlightSelected(null);
-  updateStats();
+  selectedPoint = null; highlightSelected(null); updateStats();
 }
