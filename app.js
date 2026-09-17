@@ -1,4 +1,4 @@
-// Segal House Designer - Working Version with Custom Modal
+// Segal House Designer - Complete Working Version
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -16,7 +16,7 @@ let walls = [];
 let openings = [];
 let gridPoints = [];
 let showGrid = true;
-let pendingOpening = null; // Store wall info when opening modal
+let pendingOpening = null;
 
 // Fabric canvas
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
@@ -39,10 +39,11 @@ drawGridLines();
 setupEventListeners();
 updateStats();
 renderThreeScene();
+drawOpeningMarkers();
 
 console.log('✓ Segal House Designer initialized');
 
-// ========== THREE.JS ==========
+// ========== THREE.JS 3D RENDERING ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
   if (!container) {
@@ -91,6 +92,7 @@ function initThree() {
   
   canvas3D.addEventListener('mousedown', () => isDragging = true);
   canvas3D.addEventListener('mouseup', () => isDragging = false);
+  canvas3D.addEventListener('mouseleave', () => isDragging = false);
   canvas3D.addEventListener('mousemove', (e) => {
     if (isDragging) {
       rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
@@ -197,7 +199,7 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ========== FABRIC FUNCTIONS ==========
+// ========== FABRIC CANVAS FUNCTIONS ==========
 
 function initGridPoints() {
   for (let c = 0; c <= CANVAS_COLS; c++) {
@@ -248,7 +250,8 @@ function createWall(pointA, pointB) {
   ], {
     stroke: currentMode === 'exterior' ? '#6d4aff' : '#4fc3f7',
     strokeWidth: 8,
-    selectable: true,
+    selectable: false,
+    evented: false,
     strokeCap: 'round',
     hoverCursor: 'pointer'
   });
@@ -262,13 +265,13 @@ function createWall(pointA, pointB) {
     uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35)
   };
   
-  line.wallIndex = walls.length;
   walls.push(wallData);
   fabricCanvas.add(line);
   fabricCanvas.sendToBack(line);
   
   selectedPoint = null;
   highlightSelected(null);
+  drawOpeningMarkers();
   
   updateStats();
   renderThreeScene();
@@ -306,12 +309,47 @@ function findWallUnderMouse(mx, my, tol = 12) {
   return null;
 }
 
+function drawOpeningMarkers() {
+  fabricCanvas.getObjects()
+    .filter(o => o.isOpeningMarker)
+    .forEach(o => fabricCanvas.remove(o));
+  
+  openings.forEach(opening => {
+    const wall = walls[opening.wallIndex];
+    if (!wall) return;
+    
+    const line = wall.fabricObj;
+    const p1 = { x: line.points[0], y: line.points[1] };
+    const p2 = { x: line.points[2], y: line.points[3] };
+    
+    const px = p1.x + (p2.x - p1.x) * opening.position;
+    const py = p1.y + (p2.y - p1.y) * opening.position;
+    
+    const marker = new fabric.Circle({
+      left: px,
+      top: py,
+      radius: opening.type === 'door' ? 8 : 6,
+      fill: opening.type === 'door' ? '#ff9800' : '#4fc3f7',
+      stroke: '#fff',
+      strokeWidth: 2,
+      originX: 'center',
+      originY: 'center',
+      selectable: false,
+      evented: false,
+      isOpeningMarker: true
+    });
+    
+    fabricCanvas.add(marker);
+  });
+  
+  fabricCanvas.requestRenderAll();
+}
+
 // ========== CUSTOM MODAL ==========
 function openOpeningDialog(wallResult) {
   pendingOpening = wallResult;
-  document.getElementById('openingDialog').classList.add('show');
   document.getElementById('openingDialog').classList.remove('hidden');
-  console.log('📋 Opening dialog shown for wall:', wallResult);
+  document.getElementById('openingDialog').classList.add('show');
 }
 
 function closeOpeningDialog() {
@@ -338,9 +376,9 @@ function createOpening(type) {
   };
   
   openings.push(opening);
-  console.log('✅ Opening created:', opening);
   
   closeOpeningDialog();
+  drawOpeningMarkers();
   updateStats();
   renderThreeScene();
 }
@@ -365,8 +403,8 @@ fabricCanvas.on('mouse:down', (opt) => {
       }));
       
       walls.splice(wallIdx, 1);
-      walls.forEach((w, idx) => w.index = idx);
       
+      drawOpeningMarkers();
       updateStats();
       renderThreeScene();
     }
@@ -377,8 +415,6 @@ fabricCanvas.on('mouse:down', (opt) => {
     const result = findWallUnderMouse(mx, my, 15);
     if (result) {
       openOpeningDialog(result);
-    } else {
-      console.log('⚠️ No wall detected');
     }
     return;
   }
@@ -455,11 +491,12 @@ function updateStats() {
     exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point'],
     interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point'],
     opening: ['Select Add Opening mode', 'Click ON a wall line', 'Choose window or door'],
-    delete: ['Select Delete mode', 'Click on wall/point to remove']
+    delete: ['Select Delete mode', 'Click on wall to remove']
   };
   document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
 }
 
+// ========== EVENT LISTENERS ==========
 function setupEventListeners() {
   document.getElementById('modeExterior').onclick = () => setMode('exterior');
   document.getElementById('modeInterior').onclick = () => setMode('interior');
@@ -482,9 +519,13 @@ function setupEventListeners() {
   document.getElementById('clearAll').onclick = () => {
     if (confirm('Clear everything?')) {
       walls.forEach(w => fabricCanvas.remove(w.fabricObj));
-      walls = []; openings = []; selectedPoint = null;
+      walls = [];
+      openings = [];
+      selectedPoint = null;
       highlightSelected(null);
-      updateStats(); renderThreeScene();
+      drawOpeningMarkers();
+      updateStats();
+      renderThreeScene();
     }
   };
   
@@ -502,14 +543,14 @@ function setupEventListeners() {
   };
   
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { 
-      selectedPoint = null; 
+    if (e.key === 'Escape') {
+      selectedPoint = null;
       highlightSelected(null);
       closeOpeningDialog();
     }
   });
   
-  // ====== MODAL BUTTON LISTENERS ======
+  // Modal button listeners
   document.getElementById('windowBtn').onclick = () => createOpening('window');
   document.getElementById('doorBtn').onclick = () => createOpening('door');
   document.getElementById('closeDialog').onclick = closeOpeningDialog;
@@ -519,5 +560,7 @@ function setMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
-  selectedPoint = null; highlightSelected(null); updateStats();
+  selectedPoint = null;
+  highlightSelected(null);
+  updateStats();
 }
