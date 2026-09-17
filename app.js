@@ -1,11 +1,11 @@
-// Segal House Designer - Final Working Version
+// Segal House Designer - Final Version with XYZ Coords & Scale
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
 const CANVAS_COLS = 12;
 const CANVAS_ROWS = 10;
 const WALL_HEIGHT_M = 2.4;
-const MAX_OPENING_WIDTH = 0.85; // 850mm max
+const MAX_OPENING_WIDTH = 0.85;
 
 const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
 const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
@@ -55,21 +55,13 @@ function getLinePoints(wall) {
 
 // ========== INIT ==========
 function initAll() {
-  console.log('Step 1: Init Three.js');
   initThree();
-  console.log('Step 2: Init Grid Points');
   initGridPoints();
-  console.log('Step 3: Draw Grid Lines');
   drawGridLines();
-  console.log('Step 4: Setup Event Listeners');
   setupEventListeners();
-  console.log('Step 5: Update Stats');
   updateStats();
-  console.log('Step 6: Render 3D Scene');
   renderThreeScene();
-  console.log('Step 7: Draw Opening Markers');
   drawOpeningMarkers();
-  console.log('Step 8: Load Design from URL');
   loadDesignFromURL();
   console.log('✅ Initialization complete!');
 }
@@ -84,8 +76,8 @@ function initThree() {
     return;
   }
   
-  const width = container.clientWidth || 300;
-  const height = container.clientHeight || 400;
+  const width = container.clientWidth || 400;
+  const height = container.clientHeight || 300;
   
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe8e8e8);
@@ -155,12 +147,11 @@ function initThree() {
 }
 
 function renderThreeScene() {
-  console.log('🎨 Rendering 3D scene...');
-  
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
   
+  // Center origin
   const cx = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   const cz = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   
@@ -205,7 +196,7 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings (Windows & Doors)
+    // Openings
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -217,13 +208,11 @@ function renderThreeScene() {
       let openingMat;
       
       if (opening.type === 'door') {
-        // Solid wood door
         openingMat = new THREE.MeshPhongMaterial({
           color: 0xff9800,
           side: THREE.DoubleSide
         });
       } else {
-        // Glass window - transparent and shiny
         openingMat = new THREE.MeshPhongMaterial({
           color: 0x88ccff,
           transparent: true,
@@ -279,6 +268,8 @@ function initGridPoints() {
         hasBorders: false
       });
       point.gridData = { col: c, row: r };
+      // Store world coordinates (mm from corner)
+      point.worldPos = { x: c * MODULE_SIZE, y: r * MODULE_SIZE };
       gridPoints.push(point);
       fabricCanvas.add(point);
     }
@@ -289,7 +280,7 @@ function drawGridLines() {
   const ctx = fabricCanvas.getContext();
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   
-  // Grid lines
+  // Light gray grid lines
   ctx.strokeStyle = '#e0e0e0';
   ctx.lineWidth = 1;
   
@@ -302,7 +293,7 @@ function drawGridLines() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
   }
   
-  // Column numbers (top)
+  // COLUMN NUMBERS (top)
   ctx.font = 'bold 10px Arial';
   ctx.fillStyle = '#666';
   ctx.textAlign = 'center';
@@ -313,14 +304,45 @@ function drawGridLines() {
     ctx.fillText(`${c}`, x, 5);
   }
   
-  // Row numbers (left)
+  // ROW NUMBERS (left)
   for (let r = 0; r <= CANVAS_ROWS; r++) {
     const y = r * GRID_PIXEL_SIZE;
     ctx.fillText(`${r}`, 5, y);
   }
   
-  // Wall length labels (visible on canvas)
-  walls.forEach((wall, i) => {
+  // DIMENSION LINES (below grid)
+  ctx.font = '11px Arial';
+  ctx.fillStyle = '#6d4aff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  
+  // Draw dimension labels at 900mm intervals
+  for (let c = 0; c <= CANVAS_COLS; c++) {
+    const x = c * GRID_PIXEL_SIZE;
+    const label = `${c * 0.9}m`;
+    ctx.fillText(label, x, CANVAS_HEIGHT + 12);
+  }
+  
+  // Draw dimension lines at bottom
+  ctx.strokeStyle = '#6d4aff';
+  ctx.lineWidth = 1;
+  const dimY = CANVAS_HEIGHT + 18;
+  ctx.beginPath();
+  ctx.moveTo(0, dimY);
+  ctx.lineTo(CANVAS_WIDTH, dimY);
+  ctx.stroke();
+  
+  // Tick marks at each grid line
+  for (let c = 0; c <= CANVAS_COLS; c++) {
+    const x = c * GRID_PIXEL_SIZE;
+    ctx.beginPath();
+    ctx.moveTo(x, dimY - 5);
+    ctx.lineTo(x, dimY + 5);
+    ctx.stroke();
+  }
+  
+  // WALL LENGTH LABELS (on walls)
+  walls.forEach((wall) => {
     const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
     const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
     const len = Math.hypot(dx, dy) / 1000;
@@ -363,6 +385,8 @@ function createWall(pointA, pointB) {
     mode: currentMode,
     pointA: pointA.gridData,
     pointB: pointB.gridData,
+    worldStart: pointA.worldPos,
+    worldEnd: pointB.worldPos,
     uValue: parseFloat(document.getElementById('insulationLevel')?.value || 0.35)
   };
   
@@ -587,14 +611,15 @@ function updateStats() {
   document.getElementById('heatLoss').textContent = `${heatLoss.toFixed(1)} W/K`;
   
   const instr = {
-    exterior: ['Select Exterior Wall mode', 'Click first grid point', 'Click second grid point'],
-    interior: ['Select Interior Wall mode', 'Click first grid point', 'Click second grid point'],
-    opening: ['Select Add Opening mode', 'Click ON a wall line', 'Choose window or door (max 850mm)'],
-    delete: ['Select Delete mode', 'Click on wall to remove']
+    exterior: 'Select Exterior Wall → Click first point → Click second point',
+    interior: 'Select Interior Wall → Click first point → Click second point',
+    opening: 'Select Add Opening → Click ON a wall line → Choose window or door (max 850mm)',
+    delete: 'Select Delete → Click on wall to remove'
   };
-  document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
+  document.getElementById('instructionsText').textContent = instr[currentMode];
 }
 
+// ========== LOAD/SAVE WITH X,Y COORDINATES ==========
 function loadDesignFromURL() {
   const params = new URLSearchParams(window.location.search);
   const encoded = params.get('design');
@@ -659,7 +684,27 @@ function setupEventListeners() {
   };
   
   document.getElementById('toggle3D').onclick = () => {
-    document.getElementById('three-sidebar').classList.toggle('hidden');
+    const sidebar = document.getElementById('three-sidebar');
+    const hideBtn = document.getElementById('hide3D');
+    const showBtn = document.getElementById('show3D');
+    
+    sidebar.classList.toggle('hidden');
+    
+    if (sidebar.classList.contains('hidden')) {
+      hideBtn.classList.add('hidden');
+      showBtn.classList.remove('hidden');
+    } else {
+      hideBtn.classList.remove('hidden');
+      showBtn.classList.add('hidden');
+    }
+  };
+  
+  document.getElementById('hide3D').onclick = () => {
+    document.getElementById('toggle3D').click();
+  };
+  
+  document.getElementById('show3D').onclick = () => {
+    document.getElementById('toggle3D').click();
   };
   
   document.getElementById('autoRotate').onchange = (e) => autoRotate = e.target.checked;
@@ -679,16 +724,42 @@ function setupEventListeners() {
   };
   
   document.getElementById('exportDesign').onclick = () => {
+    // EXPORT WITH WORLD COORDINATES (mm)
     const data = {
-      walls: walls.map(w => ({ mode: w.mode, pointA: w.pointA, pointB: w.pointB, uValue: w.uValue })),
-      openings: openings,
+      version: '1.0',
+      unit: 'mm',
+      moduleSize: MODULE_SIZE,
+      walls: walls.map(w => ({
+        mode: w.mode,
+        uValue: w.uValue,
+        start: { x: w.worldStart.x, y: w.worldStart.y },
+        end: { x: w.worldEnd.x, y: w.worldEnd.y }
+      })),
+      openings: openings.map(o => {
+        const wall = walls[o.wallIndex];
+        const startX = wall.worldStart.x;
+        const startY = wall.worldStart.y;
+        const endX = wall.worldEnd.x;
+        const endY = wall.worldEnd.y;
+        return {
+          type: o.type,
+          width: o.width * 1000, // Convert m to mm
+          positionRatio: o.position,
+          start: { x: startX + (endX - startX) * o.position, y: startY + (endY - startY) * o.position },
+          wallStart: { x: startX, y: startY },
+          wallEnd: { x: endX, y: endY }
+        };
+      }),
       timestamp: Date.now()
     };
+    
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `segal-${Date.now()}.json`;
     a.click();
+    
+    console.log('Exported with world coordinates (mm):', data);
   };
   
   document.addEventListener('keydown', e => {
