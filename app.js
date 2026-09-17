@@ -1,4 +1,4 @@
-// Segal House Designer - Clean Version with Debugging
+// Segal House Designer - Complete Fixed Version
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -125,7 +125,6 @@ function initThree() {
 }
 
 function renderThreeScene() {
-  console.log('🎨 Rendering 3D scene');
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
@@ -228,7 +227,6 @@ function initGridPoints() {
       fabricCanvas.add(point);
     }
   }
-  console.log(`✅ Created ${gridPoints.length} grid points`);
 }
 
 function drawGridLines() {
@@ -284,14 +282,31 @@ function createWall(pointA, pointB) {
   fabricCanvas.add(line);
   fabricCanvas.sendToBack(line);
   
-  console.log(`✅ Wall created at index ${wallData.index}`);
-  
   selectedPoint = null;
   highlightSelected(null);
   drawOpeningMarkers();
   
   updateStats();
   renderThreeScene();
+}
+
+// FIX: Safe line coordinate retrieval
+function getWallCoordinates(wall) {
+  if (!wall || !wall.fabricObj) return null;
+  const line = wall.fabricObj;
+  
+  // Fabric.js stores line points as [x1, y1, x2, y2] in the points array
+  if (!line.points || line.points.length < 4) {
+    console.warn('⚠️ Invalid line points:', line.points);
+    return null;
+  }
+  
+  return {
+    x1: line.points[0],
+    y1: line.points[1],
+    x2: line.points[2],
+    y2: line.points[3]
+  };
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -308,50 +323,47 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
   return { x: xx, y: yy, param };
 }
 
+// FIX: Safe wall detection with error handling
 function findWallUnderMouse(mx, my, tol = 15) {
-  console.log(`🔍 Searching for wall at (${mx}, ${my}), tolerance ${tol}px`);
+  if (walls.length === 0) {
+    console.log('ℹ️ No walls to check');
+    return null;
+  }
+  
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
-    const line = wall.fabricObj;
+    const coords = getWallCoordinates(wall);
     
-    const p1 = { x: line.points[0], y: line.points[1] };
-    const p2 = { x: line.points[2], y: line.points[3] };
+    if (!coords) {
+      console.warn(`⚠️ Wall ${i} has invalid coordinates`);
+      continue;
+    }
     
-    console.log(`  Checking wall ${i}: ${p1.x},${p1.y} to ${p2.x},${p2.y}`);
-    
-    const closest = getPointOnLine(mx, my, p1.x, p1.y, p2.x, p2.y);
+    const closest = getPointOnLine(mx, my, coords.x1, coords.y1, coords.x2, coords.y2);
     const dist = Math.hypot(mx - closest.x, my - closest.y);
     
-    console.log(`  Distance: ${dist.toFixed(1)}px, param: ${closest.param.toFixed(2)}`);
-    
     if (dist < tol) {
-      console.log(`✅ Wall found! Index: ${i}, Ratio: ${closest.param.toFixed(2)}`);
       return { wallIndex: i, ratio: closest.param };
     }
   }
-  console.log('❌ No wall found');
+  
   return null;
 }
 
 function drawOpeningMarkers() {
-  console.log(`📌 Drawing ${openings.length} opening markers`);
   fabricCanvas.getObjects()
     .filter(o => o.isOpeningMarker)
     .forEach(o => fabricCanvas.remove(o));
   
   openings.forEach((opening, idx) => {
     const wall = walls[opening.wallIndex];
-    if (!wall) {
-      console.warn(`⚠️ Opening ${idx} references non-existent wall ${opening.wallIndex}`);
-      return;
-    }
+    if (!wall) return;
     
-    const line = wall.fabricObj;
-    const p1 = { x: line.points[0], y: line.points[1] };
-    const p2 = { x: line.points[2], y: line.points[3] };
+    const coords = getWallCoordinates(wall);
+    if (!coords) return;
     
-    const px = p1.x + (p2.x - p1.x) * opening.position;
-    const py = p1.y + (p2.y - p1.y) * opening.position;
+    const px = coords.x1 + (coords.x2 - coords.x1) * opening.position;
+    const py = coords.y1 + (coords.y2 - coords.y1) * opening.position;
     
     const marker = new fabric.Circle({
       left: px,
@@ -375,34 +387,22 @@ function drawOpeningMarkers() {
 
 // ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
-  console.log('📋 Opening dialog for wall:', wallResult);
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
   document.getElementById('openingDialog').classList.add('show');
 }
 
 function closeOpeningDialog() {
-  console.log('❌ Closing dialog');
   pendingOpening = null;
   document.getElementById('openingDialog').classList.remove('show');
   document.getElementById('openingDialog').classList.add('hidden');
 }
 
 function createOpening(type) {
-  console.log(`🪟 Creating ${type} opening`);
-  if (!pendingOpening) {
-    console.warn('⚠️ No pending opening');
-    return;
-  }
+  if (!pendingOpening) return;
   
   const wall = walls[pendingOpening.wallIndex];
-  if (!wall) {
-    console.error('❌ Wall not found!');
-    closeOpeningDialog();
-    return;
-  }
-  
-  if (wall.mode !== 'exterior') {
+  if (!wall || wall.mode !== 'exterior') {
     alert('Openings only on exterior walls!');
     closeOpeningDialog();
     return;
@@ -416,7 +416,6 @@ function createOpening(type) {
   };
   
   openings.push(opening);
-  console.log('✅ Opening created:', opening);
   
   closeOpeningDialog();
   drawOpeningMarkers();
@@ -426,10 +425,8 @@ function createOpening(type) {
 
 // ========== MOUSE EVENTS ==========
 fabricCanvas.on('mouse:down', (opt) => {
-  console.log('🖱️ mouse:down triggered');
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
-  console.log(`  Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
     const result = findWallUnderMouse(mx, my, 15);
@@ -457,8 +454,6 @@ fabricCanvas.on('mouse:down', (opt) => {
     const result = findWallUnderMouse(mx, my, 15);
     if (result) {
       openOpeningDialog(result);
-    } else {
-      console.log('⚠️ No wall detected at click');
     }
     return;
   }
@@ -466,22 +461,16 @@ fabricCanvas.on('mouse:down', (opt) => {
   // Wall drawing mode
   const clickedPoint = getClosestGridPoint(mx, my);
   
-  if (!clickedPoint) {
-    console.log('❌ No grid point clicked');
-    return;
-  }
+  if (!clickedPoint) return;
   
   if (!selectedPoint) {
     selectedPoint = clickedPoint;
     highlightSelected(clickedPoint);
-    console.log('✅ First point selected');
   } else if (selectedPoint === clickedPoint) {
     selectedPoint = null;
     highlightSelected(null);
-    console.log('❌ Same point clicked, cancelled');
   } else {
     createWall(selectedPoint, clickedPoint);
-    console.log('✅ Wall drawn');
   }
 });
 
@@ -490,14 +479,6 @@ fabricCanvas.on('mouse:move', (opt) => {
     const pointer = fabricCanvas.getPointer(opt.e);
     const result = findWallUnderMouse(pointer.x, pointer.y, 15);
     fabricCanvas.defaultCursor = result ? 'pointer' : 'crosshair';
-  }
-});
-
-fabricCanvas.on('object:moving', (opt) => {
-  console.log('🚨 WARNING: object:moving fired - walls should not move!');
-  // Force cancel any movement
-  if (opt.target) {
-    opt.target.setCoords();
   }
 });
 
@@ -621,5 +602,4 @@ function setMode(mode) {
   selectedPoint = null;
   highlightSelected(null);
   updateStats();
-  console.log(`🔧 Mode changed to: ${mode}`);
 }
