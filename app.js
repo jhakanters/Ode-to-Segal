@@ -1,4 +1,4 @@
-// Segal House Designer - Clean Bulletproof Version
+// Segal House Designer - Final Fixed Version with Correct Fabric API
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -35,31 +35,40 @@ let rotationAngle = 0;
 
 console.log('🚀 Initializing Segal House Designer...');
 
-// ========== SAFE LINE COORDINATE ACCESS ==========
+// ========== SAFE LINE COORDINATE ACCESS (FIXED FOR FABRIC.JS) ==========
 function getLinePoints(wall) {
-  // Returns {x1, y1, x2, y2} or null if invalid
   if (!wall || !wall.fabricObj) {
     console.error('⚠️ getLinePoints: No wall or fabricObj');
     return null;
   }
   
   const line = wall.fabricObj;
-  if (!line || !Array.isArray(line.points)) {
-    console.error('⚠️ getLinePoints: Invalid line or points array', line);
-    return null;
+  
+  // Fabric.js stores coordinates as x1, y1, x2, y2 properties (NOT just points[])
+  // These are the reliable properties after the line is rendered
+  if (line.x1 !== undefined && line.y1 !== undefined && 
+      line.x2 !== undefined && line.y2 !== undefined) {
+    console.log(`✅ Using Fabric x1,y1,x2,y2: ${line.x1},${line.y1} to ${line.x2},${line.y2}`);
+    return {
+      x1: line.x1,
+      y1: line.y1,
+      x2: line.x2,
+      y2: line.y2
+    };
   }
   
-  if (line.points.length < 4) {
-    console.error('⚠️ getLinePoints: Points array too short', line.points);
-    return null;
+  // Fallback: try points array
+  if (Array.isArray(line.points) && line.points.length >= 4) {
+    return {
+      x1: line.points[0],
+      y1: line.points[1],
+      x2: line.points[2],
+      y2: line.points[3]
+    };
   }
   
-  return {
-    x1: line.points[0],
-    y1: line.points[1],
-    x2: line.points[2],
-    y2: line.points[3]
-  };
+  console.error('⚠️ Could not extract line coordinates', line);
+  return null;
 }
 
 // ========== INIT ==========
@@ -177,7 +186,10 @@ function renderThreeScene() {
   
   walls.forEach((wall, wallIdx) => {
     const coords = getLinePoints(wall);
-    if (!coords) return;
+    if (!coords) {
+      console.warn(`⚠️ Wall ${wallIdx} skipped due to invalid coords`);
+      return;
+    }
     
     const start = gridToWorld(coords.x1 / PIXEL_PER_MM / 10, wall.pointA.row);
     const end = gridToWorld(coords.x2 / PIXEL_PER_MM / 10, wall.pointB.row);
@@ -318,6 +330,8 @@ function createWall(pointA, pointB) {
   
   updateStats();
   renderThreeScene();
+  
+  console.log('✅ Wall created:', { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 });
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -335,7 +349,12 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
 }
 
 function findWallUnderMouse(mx, my, tol = 15) {
-  if (walls.length === 0) return null;
+  if (walls.length === 0) {
+    console.log('ℹ️ No walls to check');
+    return null;
+  }
+  
+  console.log(`🔍 Searching ${walls.length} walls at (${mx}, ${my})`);
   
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
@@ -349,11 +368,15 @@ function findWallUnderMouse(mx, my, tol = 15) {
     const closest = getPointOnLine(mx, my, coords.x1, coords.y1, coords.x2, coords.y2);
     const dist = Math.hypot(mx - closest.x, my - closest.y);
     
+    console.log(`  Wall ${i}: distance=${dist.toFixed(1)}px`);
+    
     if (dist < tol) {
+      console.log(`✅ Wall ${i} detected! Ratio: ${closest.param.toFixed(2)}`);
       return { wallIndex: i, ratio: closest.param };
     }
   }
   
+  console.log('❌ No wall found within tolerance');
   return null;
 }
 
@@ -392,12 +415,14 @@ function drawOpeningMarkers() {
 
 // ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
+  console.log('📋 Opening dialog for wall:', wallResult);
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
   document.getElementById('openingDialog').classList.add('show');
 }
 
 function closeOpeningDialog() {
+  console.log('❌ Closing dialog');
   pendingOpening = null;
   document.getElementById('openingDialog').classList.remove('show');
   document.getElementById('openingDialog').classList.add('hidden');
@@ -421,6 +446,7 @@ function createOpening(type) {
   };
   
   openings.push(opening);
+  console.log('✅ Opening created:', opening);
   
   closeOpeningDialog();
   drawOpeningMarkers();
@@ -432,6 +458,7 @@ function createOpening(type) {
 fabricCanvas.on('mouse:down', (opt) => {
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
+  console.log(`🖱️ mouse:down Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
     const result = findWallUnderMouse(mx, my, 15);
