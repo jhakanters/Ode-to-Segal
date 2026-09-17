@@ -4,122 +4,125 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Segal House Designer</title>
+  
+  <!-- FABRIC.JS (2D Canvas) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  
+  <!-- THREE.JS (3D Visualization) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app">
+  <div class="container">
     <header>
       <h1>🏠 Segal House Designer</h1>
-      <p>Draw your home on a 900mm modular grid • Click walls to add windows/doors</p>
+      <p>900mm Modular Method • Energy Performance Feedback</p>
     </header>
     
-    <div class="toolbar">
-      <div class="mode-group">
-        <span class="mode-label">Mode:</span>
-        <button id="modeExterior" class="mode-btn active">🧱 Exterior Wall</button>
-        <button id="modeInterior" class="mode-btn">🔲 Interior Wall</button>
-        <button id="modeOpening" class="mode-btn">🪟 Add Opening</button>
-        <button id="modeDelete" class="mode-btn">❌ Delete</button>
+    <main class="workspace">
+      <!-- 2D Canvas Area -->
+      <div class="canvas-container">
+        <canvas id="gridCanvas"></canvas>
       </div>
       
-      <div class="action-group">
-        <button id="toggleGrid" class="secondary">📐 Toggle Grid</button>
-        <button id="toggle3D" class="secondary">🔄 Toggle 3D</button>
-        <button id="clearAll" class="danger">🗑️ Clear All</button>
-        <button id="exportDesign" class="secondary">💾 Export</button>
-      </div>
-    </div>
-    
-    <div class="main-content">
-      <aside id="sidebar">
-        <section class="sidebar-section">
-          <h3>Instructions</h3>
-          <ol id="instructionsText">
-            <li>Select Exterior/Interior Wall mode</li>
-            <li>Click first grid point</li>
-            <li>Click second grid point to place wall</li>
-          </ol>
-        </section>
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <!-- Controls -->
+        <div class="control-panel">
+          <h3>🎯 Drawing Mode</h3>
+          <div class="mode-buttons">
+            <button id="modeExterior" class="mode-btn active">🧱 Exterior Wall</button>
+            <button id="modeInterior" class="mode-btn">🏠 Interior Wall</button>
+            <button id="modeOpening" class="mode-btn">🪟 Add Opening</button>
+            <button id="modeDelete" class="mode-btn">🗑️ Delete</button>
+          </div>
+          
+          <div class="options">
+            <label>
+              Insulation U-value:
+              <input type="number" id="insulationLevel" value="0.35" step="0.05" min="0.1" max="2.0">
+            </label>
+            
+            <div class="toggle-buttons">
+              <button id="toggleGrid">📐 Toggle Grid</button>
+              <button id="toggle3D">🔄 Show/Hide 3D</button>
+            </div>
+          </div>
+        </div>
         
-        <section class="sidebar-section">
-          <h3>Stats</h3>
+        <!-- Stats Panel -->
+        <div class="stats-panel">
+          <h3>📊 Statistics</h3>
           <div class="stat-row">
-            <span>Total length:</span>
-            <span id="totalLength">0 m</span>
+            <span>Total Wall Length:</span>
+            <strong id="totalLength">0.0 m</strong>
           </div>
           <div class="stat-row">
-            <span>Exterior walls:</span>
-            <span id="exteriorLength">0 m</span>
+            <span>Exterior Walls:</span>
+            <strong id="exteriorLength">0.0 m</strong>
           </div>
           <div class="stat-row">
-            <span>Interior walls:</span>
-            <span id="interiorLength">0 m</span>
+            <span>Interior Walls:</span>
+            <strong id="interiorLength">0.0 m</strong>
           </div>
           <div class="stat-row">
             <span>Openings:</span>
-            <span id="openingCount">0</span>
+            <strong id="openingCount">0</strong>
+          </div>
+          <div class="stat-row highlight">
+            <span>Energy Score:</span>
+            <strong id="energyScore">100</strong>
           </div>
           <div class="stat-row">
-            <span>Energy score:</span>
-            <span id="energyScore">--</span>
+            <span>Heat Loss:</span>
+            <strong id="heatLoss">0.0 W/K</strong>
           </div>
-          <div class="stat-row">
-            <span>Heat loss:</span>
-            <span id="heatLoss">-- W/K</span>
-          </div>
-        </section>
+        </div>
         
-        <section class="sidebar-section">
-          <h3>Legend</h3>
-          <div class="legend-item">
-            <span class="swatch exterior"></span> Exterior wall
-          </div>
-          <div class="legend-item">
-            <span class="swatch interior"></span> Interior wall
-          </div>
-          <div class="legend-item">
-            <span class="dot opening"></span> Opening (window/door)
-          </div>
-          <div class="legend-item">
-            <span class="dot point"></span> Grid point
-          </div>
-        </section>
-      </aside>
-      
-      <main id="canvas-container">
-        <canvas id="gridCanvas"></canvas>
-        <div id="cursor-follow" class="cursor-follow"></div>
-      </main>
-      
-      <aside id="three-sidebar" class="three-sidebar">
-        <div id="three-canvas"></div>
-        <div class="three-controls">
-          <label><input type="checkbox" id="autoRotate" checked> Auto-rotate</label>
-          <p>Drag to rotate • Scroll to zoom</p>
+        <!-- Actions -->
+        <div class="action-panel">
+          <button id="clearAll" class="danger">🗑️ Clear All</button>
+          <button id="exportDesign" class="primary">💾 Export JSON</button>
+        </div>
+        
+        <!-- Instructions -->
+        <div class="instructions">
+          <h3>📖 Instructions</h3>
+          <ul id="instructionsText">
+            <li>Select Exterior Wall mode</li>
+            <li>Click first grid point</li>
+            <li>Click second grid point</li>
+          </ul>
         </div>
       </aside>
-    </div>
-    
-    <footer>
-      <p>Built with the Walter Segal Method • Grid: 900mm modules</p>
-    </footer>
+    </main>
   </div>
   
-  <!-- Custom Opening Dialog -->
+  <!-- 3D Visualization Sidebar (Hidden by default) -->
+  <aside id="three-sidebar" class="hidden">
+    <div id="three-canvas"></div>
+    <div class="rotate-controls">
+      <label>
+        <input type="checkbox" id="autoRotate" checked> Auto Rotate
+      </label>
+    </div>
+  </aside>
+  
+  <!-- Opening Dialog Modal -->
   <div id="openingDialog" class="modal hidden">
     <div class="modal-content">
-      <h3>Add Opening</h3>
-      <p>What type of opening?</p>
+      <h2>Add Opening</h2>
+      <p>Choose opening type (max 850mm width):</p>
       <div class="modal-buttons">
         <button id="windowBtn" class="primary">🪟 Window</button>
         <button id="doorBtn" class="secondary">🚪 Door</button>
+        <button id="closeDialog" class="danger">Cancel</button>
       </div>
-      <button id="closeDialog" class="cancel">Cancel</button>
     </div>
   </div>
   
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Main Script -->
   <script src="app.js"></script>
 </body>
 </html>
