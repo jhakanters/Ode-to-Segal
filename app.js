@@ -1,4 +1,4 @@
-// Segal House Designer - Complete Working Version
+// Segal House Designer - Clean Version with Debugging
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -23,7 +23,8 @@ const fabricCanvas = new fabric.Canvas('gridCanvas', {
   width: CANVAS_WIDTH,
   height: CANVAS_HEIGHT,
   backgroundColor: '#fafafa',
-  selection: false
+  selection: false,
+  allowTouchScrolling: false
 });
 
 // Three.js
@@ -32,22 +33,27 @@ let walls3DGroup, openings3DGroup, gridPoints3DGroup;
 let autoRotate = true;
 let rotationAngle = 0;
 
+console.log('🚀 Initializing Segal House Designer...');
+
 // ========== INIT ==========
-initThree();
-initGridPoints();
-drawGridLines();
-setupEventListeners();
-updateStats();
-renderThreeScene();
-drawOpeningMarkers();
+function initAll() {
+  initThree();
+  initGridPoints();
+  drawGridLines();
+  setupEventListeners();
+  updateStats();
+  renderThreeScene();
+  drawOpeningMarkers();
+  console.log('✅ Initialization complete');
+}
 
-console.log('✓ Segal House Designer initialized');
+initAll();
 
-// ========== THREE.JS 3D RENDERING ==========
+// ========== THREE.JS ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
   if (!container) {
-    console.error('3D container not found!');
+    console.error('❌ 3D container not found!');
     return;
   }
   
@@ -119,6 +125,7 @@ function initThree() {
 }
 
 function renderThreeScene() {
+  console.log('🎨 Rendering 3D scene');
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
@@ -199,7 +206,7 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ========== FABRIC CANVAS FUNCTIONS ==========
+// ========== FABRIC FUNCTIONS ==========
 
 function initGridPoints() {
   for (let c = 0; c <= CANVAS_COLS; c++) {
@@ -212,6 +219,7 @@ function initGridPoints() {
         originX: 'center',
         originY: 'center',
         selectable: false,
+        evented: false,
         hasControls: false,
         hasBorders: false
       });
@@ -220,6 +228,7 @@ function initGridPoints() {
       fabricCanvas.add(point);
     }
   }
+  console.log(`✅ Created ${gridPoints.length} grid points`);
 }
 
 function drawGridLines() {
@@ -252,8 +261,14 @@ function createWall(pointA, pointB) {
     strokeWidth: 8,
     selectable: false,
     evented: false,
-    strokeCap: 'round',
-    hoverCursor: 'pointer'
+    hasControls: false,
+    hasBorders: false,
+    lockMovementX: true,
+    lockMovementY: true,
+    lockRotation: true,
+    lockScalingX: true,
+    lockScalingY: true,
+    hoverCursor: 'default'
   });
   
   const wallData = {
@@ -268,6 +283,8 @@ function createWall(pointA, pointB) {
   walls.push(wallData);
   fabricCanvas.add(line);
   fabricCanvas.sendToBack(line);
+  
+  console.log(`✅ Wall created at index ${wallData.index}`);
   
   selectedPoint = null;
   highlightSelected(null);
@@ -291,7 +308,8 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
   return { x: xx, y: yy, param };
 }
 
-function findWallUnderMouse(mx, my, tol = 12) {
+function findWallUnderMouse(mx, my, tol = 15) {
+  console.log(`🔍 Searching for wall at (${mx}, ${my}), tolerance ${tol}px`);
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
     const line = wall.fabricObj;
@@ -299,24 +317,34 @@ function findWallUnderMouse(mx, my, tol = 12) {
     const p1 = { x: line.points[0], y: line.points[1] };
     const p2 = { x: line.points[2], y: line.points[3] };
     
+    console.log(`  Checking wall ${i}: ${p1.x},${p1.y} to ${p2.x},${p2.y}`);
+    
     const closest = getPointOnLine(mx, my, p1.x, p1.y, p2.x, p2.y);
     const dist = Math.hypot(mx - closest.x, my - closest.y);
     
+    console.log(`  Distance: ${dist.toFixed(1)}px, param: ${closest.param.toFixed(2)}`);
+    
     if (dist < tol) {
+      console.log(`✅ Wall found! Index: ${i}, Ratio: ${closest.param.toFixed(2)}`);
       return { wallIndex: i, ratio: closest.param };
     }
   }
+  console.log('❌ No wall found');
   return null;
 }
 
 function drawOpeningMarkers() {
+  console.log(`📌 Drawing ${openings.length} opening markers`);
   fabricCanvas.getObjects()
     .filter(o => o.isOpeningMarker)
     .forEach(o => fabricCanvas.remove(o));
   
-  openings.forEach(opening => {
+  openings.forEach((opening, idx) => {
     const wall = walls[opening.wallIndex];
-    if (!wall) return;
+    if (!wall) {
+      console.warn(`⚠️ Opening ${idx} references non-existent wall ${opening.wallIndex}`);
+      return;
+    }
     
     const line = wall.fabricObj;
     const p1 = { x: line.points[0], y: line.points[1] };
@@ -345,23 +373,35 @@ function drawOpeningMarkers() {
   fabricCanvas.requestRenderAll();
 }
 
-// ========== CUSTOM MODAL ==========
+// ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
+  console.log('📋 Opening dialog for wall:', wallResult);
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
   document.getElementById('openingDialog').classList.add('show');
 }
 
 function closeOpeningDialog() {
+  console.log('❌ Closing dialog');
   pendingOpening = null;
   document.getElementById('openingDialog').classList.remove('show');
   document.getElementById('openingDialog').classList.add('hidden');
 }
 
 function createOpening(type) {
-  if (!pendingOpening) return;
+  console.log(`🪟 Creating ${type} opening`);
+  if (!pendingOpening) {
+    console.warn('⚠️ No pending opening');
+    return;
+  }
   
   const wall = walls[pendingOpening.wallIndex];
+  if (!wall) {
+    console.error('❌ Wall not found!');
+    closeOpeningDialog();
+    return;
+  }
+  
   if (wall.mode !== 'exterior') {
     alert('Openings only on exterior walls!');
     closeOpeningDialog();
@@ -376,6 +416,7 @@ function createOpening(type) {
   };
   
   openings.push(opening);
+  console.log('✅ Opening created:', opening);
   
   closeOpeningDialog();
   drawOpeningMarkers();
@@ -384,10 +425,11 @@ function createOpening(type) {
 }
 
 // ========== MOUSE EVENTS ==========
-
 fabricCanvas.on('mouse:down', (opt) => {
+  console.log('🖱️ mouse:down triggered');
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
+  console.log(`  Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
     const result = findWallUnderMouse(mx, my, 15);
@@ -415,6 +457,8 @@ fabricCanvas.on('mouse:down', (opt) => {
     const result = findWallUnderMouse(mx, my, 15);
     if (result) {
       openOpeningDialog(result);
+    } else {
+      console.log('⚠️ No wall detected at click');
     }
     return;
   }
@@ -422,16 +466,22 @@ fabricCanvas.on('mouse:down', (opt) => {
   // Wall drawing mode
   const clickedPoint = getClosestGridPoint(mx, my);
   
-  if (!clickedPoint) return;
+  if (!clickedPoint) {
+    console.log('❌ No grid point clicked');
+    return;
+  }
   
   if (!selectedPoint) {
     selectedPoint = clickedPoint;
     highlightSelected(clickedPoint);
+    console.log('✅ First point selected');
   } else if (selectedPoint === clickedPoint) {
     selectedPoint = null;
     highlightSelected(null);
+    console.log('❌ Same point clicked, cancelled');
   } else {
     createWall(selectedPoint, clickedPoint);
+    console.log('✅ Wall drawn');
   }
 });
 
@@ -440,6 +490,14 @@ fabricCanvas.on('mouse:move', (opt) => {
     const pointer = fabricCanvas.getPointer(opt.e);
     const result = findWallUnderMouse(pointer.x, pointer.y, 15);
     fabricCanvas.defaultCursor = result ? 'pointer' : 'crosshair';
+  }
+});
+
+fabricCanvas.on('object:moving', (opt) => {
+  console.log('🚨 WARNING: object:moving fired - walls should not move!');
+  // Force cancel any movement
+  if (opt.target) {
+    opt.target.setCoords();
   }
 });
 
@@ -563,4 +621,5 @@ function setMode(mode) {
   selectedPoint = null;
   highlightSelected(null);
   updateStats();
+  console.log(`🔧 Mode changed to: ${mode}`);
 }
