@@ -1,4 +1,4 @@
-// Segal House Designer - Complete Fixed Version
+// Segal House Designer - Clean Bulletproof Version
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -34,6 +34,33 @@ let autoRotate = true;
 let rotationAngle = 0;
 
 console.log('🚀 Initializing Segal House Designer...');
+
+// ========== SAFE LINE COORDINATE ACCESS ==========
+function getLinePoints(wall) {
+  // Returns {x1, y1, x2, y2} or null if invalid
+  if (!wall || !wall.fabricObj) {
+    console.error('⚠️ getLinePoints: No wall or fabricObj');
+    return null;
+  }
+  
+  const line = wall.fabricObj;
+  if (!line || !Array.isArray(line.points)) {
+    console.error('⚠️ getLinePoints: Invalid line or points array', line);
+    return null;
+  }
+  
+  if (line.points.length < 4) {
+    console.error('⚠️ getLinePoints: Points array too short', line.points);
+    return null;
+  }
+  
+  return {
+    x1: line.points[0],
+    y1: line.points[1],
+    x2: line.points[2],
+    y2: line.points[3]
+  };
+}
 
 // ========== INIT ==========
 function initAll() {
@@ -149,8 +176,11 @@ function renderThreeScene() {
   });
   
   walls.forEach((wall, wallIdx) => {
-    const start = gridToWorld(wall.pointA.col, wall.pointA.row);
-    const end = gridToWorld(wall.pointB.col, wall.pointB.row);
+    const coords = getLinePoints(wall);
+    if (!coords) return;
+    
+    const start = gridToWorld(coords.x1 / PIXEL_PER_MM / 10, wall.pointA.row);
+    const end = gridToWorld(coords.x2 / PIXEL_PER_MM / 10, wall.pointB.row);
     
     const length = Math.hypot(end.x - start.x, end.z - start.z);
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
@@ -290,25 +320,6 @@ function createWall(pointA, pointB) {
   renderThreeScene();
 }
 
-// FIX: Safe line coordinate retrieval
-function getWallCoordinates(wall) {
-  if (!wall || !wall.fabricObj) return null;
-  const line = wall.fabricObj;
-  
-  // Fabric.js stores line points as [x1, y1, x2, y2] in the points array
-  if (!line.points || line.points.length < 4) {
-    console.warn('⚠️ Invalid line points:', line.points);
-    return null;
-  }
-  
-  return {
-    x1: line.points[0],
-    y1: line.points[1],
-    x2: line.points[2],
-    y2: line.points[3]
-  };
-}
-
 function getPointOnLine(px, py, x1, y1, x2, y2) {
   const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
   const dot = A * C + B * D;
@@ -323,19 +334,15 @@ function getPointOnLine(px, py, x1, y1, x2, y2) {
   return { x: xx, y: yy, param };
 }
 
-// FIX: Safe wall detection with error handling
 function findWallUnderMouse(mx, my, tol = 15) {
-  if (walls.length === 0) {
-    console.log('ℹ️ No walls to check');
-    return null;
-  }
+  if (walls.length === 0) return null;
   
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
-    const coords = getWallCoordinates(wall);
+    const coords = getLinePoints(wall);
     
     if (!coords) {
-      console.warn(`⚠️ Wall ${i} has invalid coordinates`);
+      console.log(`⚠️ Skipping wall ${i}, invalid coordinates`);
       continue;
     }
     
@@ -357,9 +364,7 @@ function drawOpeningMarkers() {
   
   openings.forEach((opening, idx) => {
     const wall = walls[opening.wallIndex];
-    if (!wall) return;
-    
-    const coords = getWallCoordinates(wall);
+    const coords = getLinePoints(wall);
     if (!coords) return;
     
     const px = coords.x1 + (coords.x2 - coords.x1) * opening.position;
