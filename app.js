@@ -1,4 +1,4 @@
-// Segal House Designer - Final Fixed Version with Correct Fabric API
+// Segal House Designer - Complete Working Version
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
@@ -35,7 +35,7 @@ let rotationAngle = 0;
 
 console.log('🚀 Initializing Segal House Designer...');
 
-// ========== SAFE LINE COORDINATE ACCESS (FIXED FOR FABRIC.JS) ==========
+// ========== SAFE LINE COORDINATE ACCESS ==========
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) {
     console.error('⚠️ getLinePoints: No wall or fabricObj');
@@ -44,11 +44,9 @@ function getLinePoints(wall) {
   
   const line = wall.fabricObj;
   
-  // Fabric.js stores coordinates as x1, y1, x2, y2 properties (NOT just points[])
-  // These are the reliable properties after the line is rendered
+  // Try x1, y1, x2, y2 first (Fabric.js properties)
   if (line.x1 !== undefined && line.y1 !== undefined && 
       line.x2 !== undefined && line.y2 !== undefined) {
-    console.log(`✅ Using Fabric x1,y1,x2,y2: ${line.x1},${line.y1} to ${line.x2},${line.y2}`);
     return {
       x1: line.x1,
       y1: line.y1,
@@ -57,7 +55,7 @@ function getLinePoints(wall) {
     };
   }
   
-  // Fallback: try points array
+  // Fallback: points array
   if (Array.isArray(line.points) && line.points.length >= 4) {
     return {
       x1: line.points[0],
@@ -80,6 +78,7 @@ function initAll() {
   updateStats();
   renderThreeScene();
   drawOpeningMarkers();
+  loadDesignFromURL();
   console.log('✅ Initialization complete');
 }
 
@@ -161,6 +160,8 @@ function initThree() {
 }
 
 function renderThreeScene() {
+  console.log('🎨 Rendering 3D scene...');
+  
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
@@ -175,6 +176,7 @@ function renderThreeScene() {
     };
   }
   
+  // Grid points
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
@@ -184,15 +186,10 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
+  // Walls - use grid coordinates (pointA/pointB), NOT Fabric pixel coordinates
   walls.forEach((wall, wallIdx) => {
-    const coords = getLinePoints(wall);
-    if (!coords) {
-      console.warn(`⚠️ Wall ${wallIdx} skipped due to invalid coords`);
-      return;
-    }
-    
-    const start = gridToWorld(coords.x1 / PIXEL_PER_MM / 10, wall.pointA.row);
-    const end = gridToWorld(coords.x2 / PIXEL_PER_MM / 10, wall.pointB.row);
+    const start = gridToWorld(wall.pointA.col, wall.pointA.row);
+    const end = gridToWorld(wall.pointB.col, wall.pointB.row);
     
     const length = Math.hypot(end.x - start.x, end.z - start.z);
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
@@ -205,12 +202,15 @@ function renderThreeScene() {
       wallMat
     );
     wallMesh.position.set(
-      (start.x + end.x) / 2, WALL_HEIGHT_M / 2, (start.z + end.z) / 2
+      (start.x + end.x) / 2,
+      WALL_HEIGHT_M / 2,
+      (start.z + end.z) / 2
     );
     wallMesh.rotation.y = -angle;
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
+    // Openings on this wall
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -231,6 +231,8 @@ function renderThreeScene() {
       openingMesh.rotation.y = -angle;
       openings3DGroup.add(openingMesh);
     });
+    
+    console.log(`✅ Wall ${wallIdx}: ${length.toFixed(2)}m @ ${wall.mode}`);
   });
   
   animate();
@@ -330,8 +332,6 @@ function createWall(pointA, pointB) {
   
   updateStats();
   renderThreeScene();
-  
-  console.log('✅ Wall created:', { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 });
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -354,8 +354,6 @@ function findWallUnderMouse(mx, my, tol = 15) {
     return null;
   }
   
-  console.log(`🔍 Searching ${walls.length} walls at (${mx}, ${my})`);
-  
   for (let i = 0; i < walls.length; i++) {
     const wall = walls[i];
     const coords = getLinePoints(wall);
@@ -368,15 +366,12 @@ function findWallUnderMouse(mx, my, tol = 15) {
     const closest = getPointOnLine(mx, my, coords.x1, coords.y1, coords.x2, coords.y2);
     const dist = Math.hypot(mx - closest.x, my - closest.y);
     
-    console.log(`  Wall ${i}: distance=${dist.toFixed(1)}px`);
-    
     if (dist < tol) {
       console.log(`✅ Wall ${i} detected! Ratio: ${closest.param.toFixed(2)}`);
       return { wallIndex: i, ratio: closest.param };
     }
   }
   
-  console.log('❌ No wall found within tolerance');
   return null;
 }
 
@@ -415,14 +410,12 @@ function drawOpeningMarkers() {
 
 // ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
-  console.log('📋 Opening dialog for wall:', wallResult);
   pendingOpening = wallResult;
   document.getElementById('openingDialog').classList.remove('hidden');
   document.getElementById('openingDialog').classList.add('show');
 }
 
 function closeOpeningDialog() {
-  console.log('❌ Closing dialog');
   pendingOpening = null;
   document.getElementById('openingDialog').classList.remove('show');
   document.getElementById('openingDialog').classList.add('hidden');
@@ -446,7 +439,6 @@ function createOpening(type) {
   };
   
   openings.push(opening);
-  console.log('✅ Opening created:', opening);
   
   closeOpeningDialog();
   drawOpeningMarkers();
@@ -458,7 +450,6 @@ function createOpening(type) {
 fabricCanvas.on('mouse:down', (opt) => {
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
-  console.log(`🖱️ mouse:down Mode: ${currentMode}, Click: (${mx}, ${my})`);
   
   if (currentMode === 'delete') {
     const result = findWallUnderMouse(mx, my, 15);
@@ -567,6 +558,49 @@ function updateStats() {
   document.getElementById('instructionsText').innerHTML = instr[currentMode].map(t => `<li>${t}</li>`).join('');
 }
 
+// ========== LOAD/SAVE FROM URL ==========
+function loadDesignFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('design');
+  
+  if (encoded) {
+    try {
+      const jsonStr = decodeURIComponent(atob(encoded));
+      const data = JSON.parse(jsonStr);
+      loadDesign(data);
+      console.log('✅ Design loaded from URL');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (err) {
+      console.error('Failed to load design from URL:', err);
+    }
+  }
+}
+
+function loadDesign(data) {
+  walls.forEach(w => fabricCanvas.remove(w.fabricObj));
+  walls = [];
+  openings = [];
+  
+  data.walls.forEach((wallData) => {
+    const pointA = gridPoints[wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col];
+    const pointB = gridPoints[wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col];
+    
+    if (pointA && pointB) {
+      // Temporarily switch mode to create wall correctly
+      const oldMode = currentMode;
+      currentMode = wallData.mode;
+      createWall(pointA, pointB);
+      currentMode = oldMode;
+      walls[walls.length - 1].uValue = wallData.uValue;
+    }
+  });
+  
+  openings.push(...data.openings);
+  drawOpeningMarkers();
+  updateStats();
+  renderThreeScene();
+}
+
 // ========== EVENT LISTENERS ==========
 function setupEventListeners() {
   document.getElementById('modeExterior').onclick = () => setMode('exterior');
@@ -621,7 +655,6 @@ function setupEventListeners() {
     }
   });
   
-  // Modal button listeners
   document.getElementById('windowBtn').onclick = () => createOpening('window');
   document.getElementById('doorBtn').onclick = () => createOpening('door');
   document.getElementById('closeDialog').onclick = closeOpeningDialog;
