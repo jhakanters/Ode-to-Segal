@@ -710,122 +710,244 @@ function loadDesign(data) {
   renderThreeScene();
 }
 
-// ========== EXPORT FUNCTIONS ==========
-// ========== FIXED GBXML EXPORT (OPENSTUDIO COMPATIBLE) ==========
+// ========== FINAL FIXED GBXML EXPORT ==========
 function exportAsGbXML() {
   const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
-  const timestamp = new Date().toISOString();
+  
+  // Calculate bounding box for floor area
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  walls.forEach(wall => {
+    const x1 = wall.worldStart.x / 1000;
+    const z1 = (TOTAL_Y - wall.worldStart.y) / 1000;
+    const x2 = wall.worldEnd.x / 1000;
+    const z2 = (TOTAL_Y - wall.worldEnd.y) / 1000;
+    minX = Math.min(minX, x1, x2);
+    maxX = Math.max(maxX, x1, x2);
+    minZ = Math.min(minZ, z1, z2);
+    maxZ = Math.max(maxZ, z1, z2);
+  });
+  
+  const floorArea = (maxX - minX) * (maxZ - minZ) || 0;
   
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<gbXML xmlns="http://www.gbxml.org/schema/gbXML" schemaVersion="6-01" 
-       temperatureUnit="Celsius" pressureUnit="Pa" lengthUnit="Meter" 
-       areaUnit="SquareMeters" volumeUnit="CubicMeter" useSIUnitsForResults="true">
+<gbXML xmlns="http://www.gbxml.org/schema/gbXML" 
+       useSIUnitsForResults="true" temperatureUnit="Celsius" 
+       lengthUnit="Meter" areaUnit="SquareMeters" volumeUnit="CubicMeter">
   
-  <!-- Project Info -->
-  <Name>Segal House Design</Name>
-  <Description>Walter Segal Modular Housing - Energy Model Export</Description>
+  <Name>Segal House</Name>
   <TemperatureUnit>Celsius</TemperatureUnit>
   <LengthUnit>Meter</LengthUnit>
   <AreaUnit>SquareMeters</AreaUnit>
   
-  <!-- Location -->
   <Location>
     <Latitude>51.5074</Latitude>
     <Longitude>-0.1278</Longitude>
-    <Elevation>11</Elevation>
   </Location>
   
-  <!-- Materials with Thermal Properties -->
   <Materials>
-    <Material id="wall_concrete" materialType="Opaque">
-      <Name>Concrete Block Wall (3m)</Name>
-      <Layer id="layer_concrete_main">
-        <Thickness unit="Meters">0.15</Thickness>
-        <Conductivity unit="W/(m-K)">1.7</Conductivity>
-        <Density unit="kg/m^3">2300</Density>
-        <SpecificHeat unit="J/(kg-K)">920</SpecificHeat>
-        <Roughness>MediumRough</Roughness>
-      </Layer>
+    <Material id="mat_wall" materialType="Opaque">
+      <Name>Concrete Block Wall</Name>
       <UValue>0.35</UValue>
       <Absorptance>0.8</Absorptance>
       <Emittance>0.9</Emittance>
     </Material>
-    
-    <Material id="glazing_double" materialType="Glazing">
-      <Name>Double Glazed Window</Name>
-      <Layer id="glass_outer">
-        <Thickness unit="Meters">0.004</Thickness>
-        <Transmittance>0.65</Transmittance>
-        <Reflectance>0.08</Reflectance>
-      </Layer>
-      <AirGap unit="Meters">0.012</AirGap>
-      <Layer id="glass_inner">
-        <Thickness unit="Meters">0.004</Thickness>
-        <Transmittance>0.65</Transmittance>
-        <Reflectance>0.08</Reflectance>
-      </Layer>
+    <Material id="mat_window" materialType="Glazing">
+      <Name>Double Glazing</Name>
       <UValue>1.2</UValue>
       <SHGC>0.62</SHGC>
       <VisibleTransmittance>0.7</VisibleTransmittance>
     </Material>
-    
-    <Material id="door_solid" materialType="Opaque">
+    <Material id="mat_door" materialType="Opaque">
       <Name>Solid Door</Name>
       <UValue>2.0</UValue>
-      <Absorptance>0.7</Absorptance>
     </Material>
-    
-    <Material id="floor_slab" materialType="Opaque">
+    <Material id="mat_floor" materialType="Opaque">
       <Name>Floor Slab</Name>
       <UValue>0.25</UValue>
     </Material>
-    
-    <Material id="roof_slab" materialType="Opaque">
+    <Material id="mat_roof" materialType="Opaque">
       <Name>Roof Slab</Name>
       <UValue>0.35</UValue>
-      <SolarAbsorptance>0.7</SolarAbsorptance>
     </Material>
   </Materials>
   
-  <!-- Thermal Zones -->
   <ThermalZones>
-    <ThermalZone id="zone_interior">
-      <Name>Living Space</Name>
-      <Condition>Residential</Condition>
-      <MinimumFreshAirFlowPerArea>0.3</MinimumFreshAirFlowPerArea>
+    <ThermalZone id="zone_residential">
+      <Name>Residential Zone</Name>
     </ThermalZone>
   </ThermalZones>
   
-  <!-- Spaces (defines air volumes bounded by surfaces) -->
   <Spaces>
-    <Space id="space_interior">
-      <Name>Interior Living Space</Name>
-      <ThermalZoneId>zone_interior</ThermalZoneId>
-      <FloorArea>0</FloorArea>
-      <CeilingHeight>3.0</CeilingHeight>
-      <Volume>0</Volume>
+    <Space id="space_main">
+      <Name>Main Space</Name>
+      <ThermalZoneId>zone_residential</ThermalZoneId>
+      <FloorArea>${floorArea.toFixed(2)}</FloorArea>
+      <CeilingHeight>${WALL_HEIGHT_M}</CeilingHeight>
+      <Volume>${(floorArea * WALL_HEIGHT_M).toFixed(2)}</Volume>
     </Space>
   </Spaces>
   
-  <!-- Surfaces (walls) -->
-  <Surfaces>
-    ${generateWallsXml(TOTAL_Y)}
+  <Surfaces>`;
+  
+  // Generate walls with CORRECT vertex ordering
+  walls.forEach((wall, i) => {
+    const start = wall.worldStart;
+    const end = wall.worldEnd;
+    
+    const x1 = start.x / 1000;
+    const y1 = (TOTAL_Y - start.y) / 1000;
+    const x2 = end.x / 1000;
+    const y2 = (TOTAL_Y - end.y) / 1000;
+    
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    const height = WALL_HEIGHT_M;
+    
+    // Azimuth from NORTH, clockwise
+    let angle = Math.atan2(y2 - y1, x2 - x1);
+    let azimuth = (90 - angle * 180 / Math.PI) % 360;
+    if (azimuth < 0) azimuth += 360;
+    
+    const isExterior = wall.mode === 'exterior';
+    const surfaceType = isExterior ? 'Wall' : 'InteriorWall';
+    
+    // Four vertices: BOTTOM-RIGHT, BOTTOM-LEFT, TOP-LEFT, TOP-RIGHT
+    // Counter-clockwise when viewed from OUTSIDE (normal points INSIDE)
+    // Start bottom-right, go counter-clockwise
+    const p1 = { x: x1, y: y1, z: 0 };
+    const p2 = { x: x2, y: y2, z: 0 };
+    const p3 = { x: x2, y: y2, z: height };
+    const p4 = { x: x1, y: y1, z: height };
+    
+    const adjSpace = isExterior ? 'outdoors' : 'space_main';
+    const adjObjectType = isExterior ? 'Outdoors' : 'Ground';
+    
+    xml += `
+    <Surface id="surf_wall_${i}" surfaceType="${surfaceType}" 
+             adjacentSpaceId="${adjSpace}" adjacentSpaceId2="${adjSpace}"
+             buildingSurfaceType="Vertical" aboveGrade="true">
+      <Name>Wall_${i}_${wall.mode}</Name>
+      <Area>${(length * height).toFixed(2)}</Area>
+      <Azimuth>${azimuth.toFixed(0)}</Azimuth>
+      <Tilt>90</Tilt>
+      <Vertices>
+        <Vertex><Coordinates x="${p1.x.toFixed(3)}" y="${p1.y.toFixed(3)}" z="${p1.z.toFixed(3)}"/></Vertex>
+        <Vertex><Coordinates x="${p2.x.toFixed(3)}" y="${p2.y.toFixed(3)}" z="${p2.z.toFixed(3)}"/></Vertex>
+        <Vertex><Coordinates x="${p3.x.toFixed(3)}" y="${p3.y.toFixed(3)}" z="${p3.z.toFixed(3)}"/></Vertex>
+        <Vertex><Coordinates x="${p4.x.toFixed(3)}" y="${p4.y.toFixed(3)}" z="${p4.z.toFixed(3)}"/></Vertex>
+      </Vertices>
+      <ConstructionId>mat_wall</ConstructionId>
+    </Surface>`;
+  });
+  
+  // Floors
+  if (maxX > minX && maxZ > minZ) {
+    xml += `
+    <Surface id="surf_floor" surfaceType="Slab" adjacentSpaceId="space_main" 
+             buildingSurfaceType="Horizontal" aboveGrade="false">
+      <Name>Floor</Name>
+      <Area>${floorArea.toFixed(2)}</Area>
+      <Azimuth>0</Azimuth>
+      <Tilt>0</Tilt>
+      <Vertices>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0"/></Vertex>
+      </Vertices>
+      <ConstructionId>mat_floor</ConstructionId>
+    </Surface>`;
+  }
+  
+  // Roofs
+  if (maxX > minX && maxZ > minZ) {
+    xml += `
+    <Surface id="surf_roof" surfaceType="Roof" adjacentSpaceId="space_main"
+             buildingSurfaceType="Horizontal" aboveGrade="true">
+      <Name>Roof</Name>
+      <Area>${floorArea.toFixed(2)}</Area>
+      <Azimuth>0</Azimuth>
+      <Tilt>0</Tilt>
+      <Vertices>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
+      </Vertices>
+      <ConstructionId>mat_roof</ConstructionId>
+    </Surface>`;
+  }
+  
+  xml += `
   </Surfaces>
   
-  <!-- Openings (windows and doors) -->
-  <Openings>
-    ${generateOpeningsXml()}
-  </Openings>
+  <SubSurfaces>`;  // Note: OpenStudio calls openings "SubSurfaces"
+  
+  // Openings - MUST be on the same plane as parent wall
+  openings.forEach((opening, i) => {
+    const wallIdx = opening.wallIndex;
+    const wall = walls[wallIdx];
+    if (!wall) return;
+    
+    const start = wall.worldStart;
+    const end = wall.worldEnd;
+    
+    const x1 = start.x / 1000;
+    const y1 = (TOTAL_Y - start.y) / 1000;
+    const x2 = end.x / 1000;
+    const y2 = (TOTAL_Y - end.y) / 1000;
+    
+    const ratio = Math.max(0.15, Math.min(0.85, opening.position));
+    const pw = x1 + (x2 - x1) * ratio;  // Center point on wall
+    const ph = y1 + (y2 - y1) * ratio;
+    
+    const width = opening.width;  // meters
+    const height = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
+    const baseZ = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
+    
+    const surfaceId = `surf_wall_${wallIdx}`;
+    const type = opening.type === 'window' ? 'Window' : 'Door';
+    const materialId = opening.type === 'window' ? 'mat_window' : 'mat_door';
+    
+    // SubSurface vertices MUST lie ON the wall plane
+    // 4 corners of the opening, all at same distance from wall origin
+    const hw = width / 2;  // Half-width
+    
+    xml += `
+    <SubSurface id="sub_${type}_${i}" subSurfaceType="${type}" parentSurfaceId="${surfaceId}">
+      <Name>${type}_${i}</Name>
+      <Area>${(width * height).toFixed(2)}</Area>
+      <Width>${width.toFixed(2)}</Width>
+      <Height>${height.toFixed(2)}</Height>
+      <FrameAndDivider>
+        <FrameType>Unknown</FrameType>
+        <FrameDepth unit="Meters">0.1</FrameDepth>
+        <DividerDepth unit="Meters">0.1</DividerDepth>
+      </FrameAndDivider>
+      <GlassLayers>${opening.type === 'window' ? 'Double' : 'Single'}</GlassLayers>
+      <UValue>${opening.type === 'window' ? 1.2 : 2.0}</UValue>
+      ${opening.type === 'window' ? `<SHGC>0.62</SHGC><VisibleTransmittance>0.7</VisibleTransmittance>` : ''}
+      <ConstructionId>${materialId}</ConstructionId>
+      <Vertices>
+        <Vertex><Coordinates x="${(pw - hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
+        <Vertex><Coordinates x="${(pw + hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
+        <Vertex><Coordinates x="${(pw + hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${(baseZ + height).toFixed(2)}"/></Vertex>
+        <Vertex><Coordinates x="${(pw - hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${(baseZ + height).toFixed(2)}"/></Vertex>
+      </Vertices>
+    </SubSurface>`;
+  });
+  
+  xml += `
+  </SubSurfaces>
   
 </gbXML>`;
   
   const blob = new Blob([xml], { type: 'text/xml' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `segal-house-energy-${Date.now()}.xml`;
+  a.download = `segal-openstudio-${Date.now().toString().slice(-6)}.xml`;
   a.click();
   
-  console.log('✅ OpenStudio-compatible gbXML exported!');
+  console.log('✅ Fixed OpenStudio gbXML exported!');
 }
 
 function generateWallsXml(TOTAL_Y) {
