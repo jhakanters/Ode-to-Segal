@@ -711,86 +711,278 @@ function loadDesign(data) {
 }
 
 // ========== EXPORT FUNCTIONS ==========
+// ========== FIXED GBXML EXPORT (OPENSTUDIO COMPATIBLE) ==========
 function exportAsGbXML() {
   const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
   const timestamp = new Date().toISOString();
   
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<gbXML xmlns="http://gbxml.org/schema/gbXML_v6_01" schemaVersion="6_01" timeZone="-8" surfaceType="RoofFloor" useSIUnitsForResults="true" temperatureUnit="Celsius">
+<gbXML xmlns="http://www.gbxml.org/schema/gbXML" schemaVersion="6-01" 
+       temperatureUnit="Celsius" pressureUnit="Pa" lengthUnit="Meter" 
+       areaUnit="SquareMeters" volumeUnit="CubicMeter" useSIUnitsForResults="true">
+  
+  <!-- Project Info -->
   <Name>Segal House Design</Name>
-  <Description>Walter Segal modular housing - Energy Model</Description>
+  <Description>Walter Segal Modular Housing - Energy Model Export</Description>
+  <TemperatureUnit>Celsius</TemperatureUnit>
+  <LengthUnit>Meter</LengthUnit>
+  <AreaUnit>SquareMeters</AreaUnit>
+  
+  <!-- Location -->
   <Location>
-    <City>Lumo</City>
-    <Country>United Kingdom</Country>
+    <Latitude>51.5074</Latitude>
+    <Longitude>-0.1278</Longitude>
+    <Elevation>11</Elevation>
   </Location>
+  
+  <!-- Materials with Thermal Properties -->
   <Materials>
-    <Material id="concrete_wall"><Name>Concrete Block Wall</Name><U-value unit="W/(m^2-K)">0.35</U-value></Material>
-    <Material id="window_glazing"><Name>Double Glazed Window</Name><U-value unit="W/(m^2-K)">1.2</U-value></Material>
-    <Material id="door_solid"><Name>Solid Door</Name><U-value unit="W/(m^2-K)">2.0</U-value></Material>
+    <Material id="wall_concrete" materialType="Opaque">
+      <Name>Concrete Block Wall (3m)</Name>
+      <Layer id="layer_concrete_main">
+        <Thickness unit="Meters">0.15</Thickness>
+        <Conductivity unit="W/(m-K)">1.7</Conductivity>
+        <Density unit="kg/m^3">2300</Density>
+        <SpecificHeat unit="J/(kg-K)">920</SpecificHeat>
+        <Roughness>MediumRough</Roughness>
+      </Layer>
+      <UValue>0.35</UValue>
+      <Absorptance>0.8</Absorptance>
+      <Emittance>0.9</Emittance>
+    </Material>
+    
+    <Material id="glazing_double" materialType="Glazing">
+      <Name>Double Glazed Window</Name>
+      <Layer id="glass_outer">
+        <Thickness unit="Meters">0.004</Thickness>
+        <Transmittance>0.65</Transmittance>
+        <Reflectance>0.08</Reflectance>
+      </Layer>
+      <AirGap unit="Meters">0.012</AirGap>
+      <Layer id="glass_inner">
+        <Thickness unit="Meters">0.004</Thickness>
+        <Transmittance>0.65</Transmittance>
+        <Reflectance>0.08</Reflectance>
+      </Layer>
+      <UValue>1.2</UValue>
+      <SHGC>0.62</SHGC>
+      <VisibleTransmittance>0.7</VisibleTransmittance>
+    </Material>
+    
+    <Material id="door_solid" materialType="Opaque">
+      <Name>Solid Door</Name>
+      <UValue>2.0</UValue>
+      <Absorptance>0.7</Absorptance>
+    </Material>
+    
+    <Material id="floor_slab" materialType="Opaque">
+      <Name>Floor Slab</Name>
+      <UValue>0.25</UValue>
+    </Material>
+    
+    <Material id="roof_slab" materialType="Opaque">
+      <Name>Roof Slab</Name>
+      <UValue>0.35</UValue>
+      <SolarAbsorptance>0.7</SolarAbsorptance>
+    </Material>
   </Materials>
-  <Surfaces>`;
   
-  walls.forEach((wall, i) => {
-    const start = wall.worldStart;
-    const end = wall.worldEnd;
-    const x1 = start.x / 1000;
-    const y1 = (TOTAL_Y - start.y) / 1000;
-    const x2 = end.x / 1000;
-    const y2 = (TOTAL_Y - end.y) / 1000;
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    const centerX = (x1 + x2) / 2;
-    const centerY = (y1 + y2) / 2;
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const azim = (angle * 180 / Math.PI) % 360;
-    const surfaceType = wall.mode === 'exterior' ? 'Wall' : 'InteriorWall';
-    const adjSurface = wall.mode === 'exterior' ? 'Ground' : 'interior_zone';
-    
-    xml += `
-    <Surface id="surface_${i}" surfaceType="${surfaceType}" adjacentSpaceId="${adjSurface}">
-      <Name>${wall.mode} Wall ${i}</Name>
-      <CADMaterialId>concrete_wall</CADMaterialId>
-      <Area unit="SquareMeters">${(length * WALL_HEIGHT_M).toFixed(2)}</Area>
-      <Azimuth>${azim.toFixed(1)}</Azimuth><Tilt>90</Tilt>
-      <RectangularGeometry coordinateSystem="WorldCS">
-        <Origin x="${centerX.toFixed(3)}" y="${centerY.toFixed(3)}" z="${(WALL_HEIGHT_M/2).toFixed(3)}"/>
-        <xDir x="${Math.cos(angle).toFixed(3)}" y="${Math.sin(angle).toFixed(3)}" z="0"/>
-        <zDir x="0" y="0" z="1"/>
-      </RectangularGeometry>
-    </Surface>`;
-  });
+  <!-- Thermal Zones -->
+  <ThermalZones>
+    <ThermalZone id="zone_interior">
+      <Name>Living Space</Name>
+      <Condition>Residential</Condition>
+      <MinimumFreshAirFlowPerArea>0.3</MinimumFreshAirFlowPerArea>
+    </ThermalZone>
+  </ThermalZones>
   
-  xml += `</Surfaces><Openings>`;
+  <!-- Spaces (defines air volumes bounded by surfaces) -->
+  <Spaces>
+    <Space id="space_interior">
+      <Name>Interior Living Space</Name>
+      <ThermalZoneId>zone_interior</ThermalZoneId>
+      <FloorArea>0</FloorArea>
+      <CeilingHeight>3.0</CeilingHeight>
+      <Volume>0</Volume>
+    </Space>
+  </Spaces>
   
-  openings.forEach((opening, i) => {
-    const wall = walls[opening.wallIndex];
-    if (!wall) return;
-    const width = opening.width;
-    const height = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
-    const openingType = opening.type === 'window' ? 'Window' : 'Door';
-    const materialId = opening.type === 'window' ? 'window_glazing' : 'door_solid';
-    const surfaceId = `surface_${opening.wallIndex}`;
-    
-    xml += `
-    <Opening id="opening_${i}" openingType="${openingType}">
-      <Name>${openingType} ${i}</Name>
-      <CADMaterialId>${materialId}</CADMaterialId>
-      <Area unit="SquareMeters">${(width * height).toFixed(2)}</Area>
-      <AttachedToSurface>${surfaceId}</AttachedToSurface>
-      <RectangleGeometry>
-        <Origin x="0" y="0" z="${(opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M + height/2).toFixed(3)}"/>
-        <Length unit="Meters">${width.toFixed(3)}</Length>
-        <Width unit="Meters">${height.toFixed(3)}</Width>
-      </RectangleGeometry>
-    </Opening>`;
-  });
+  <!-- Surfaces (walls) -->
+  <Surfaces>
+    ${generateWallsXml(TOTAL_Y)}
+  </Surfaces>
   
-  xml += `</Openings></gbXML>`;
+  <!-- Openings (windows and doors) -->
+  <Openings>
+    ${generateOpeningsXml()}
+  </Openings>
+  
+</gbXML>`;
   
   const blob = new Blob([xml], { type: 'text/xml' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `segal-gbxml-${Date.now()}.xml`;
+  a.download = `segal-house-energy-${Date.now()}.xml`;
   a.click();
+  
+  console.log('✅ OpenStudio-compatible gbXML exported!');
+}
+
+function generateWallsXml(TOTAL_Y) {
+  let xml = '';
+  const spaceRef = 'space_interior';
+  
+  walls.forEach((wall, i) => {
+    const start = wall.worldStart;
+    const end = wall.worldEnd;
+    
+    // Convert mm to meters and flip Y axis for standard coordinates
+    const x1 = start.x / 1000;
+    const y1 = (TOTAL_Y - start.y) / 1000;
+    const x2 = end.x / 1000;
+    const y2 = (TOTAL_Y - end.y) / 1000;
+    
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    const thickness = 0.15;
+    const height = WALL_HEIGHT_M; // 3.0m
+    
+    const centerX = (x1 + x2) / 2;
+    const centerY = (y1 + y2) / 2;
+    const centerZ = height / 2;
+    
+    // Calculate wall angle (azimuth from north, clockwise)
+    let angle = Math.atan2(y2 - y1, x2 - x1);
+    let azimuth = (90 - angle * 180 / Math.PI) % 360;
+    if (azimuth < 0) azimuth += 360;
+    
+    // Determine surface type
+    const isExterior = wall.mode === 'exterior';
+    const surfaceType = isExterior ? 'Wall' : 'InterzonalWall';
+    const adjSpace = isExterior ? 'outdoors' : spaceRef;
+    const adjObjectType = isExterior ? 'Outdoors' : 'Ground';
+    
+    // Material assignment
+    const materialId = isExterior ? 'wall_concrete' : 'wall_concrete';
+    
+    // Calculate vertex order for proper normal direction (clockwise when viewed from outside)
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    
+    // Build four vertices of the wall (bottom-left, bottom-right, top-right, top-left)
+    // Normal should point INWARD to the space (gbXML convention)
+    const p1x = x1, p1y = y1, p1z = 0;           // Bottom start
+    const p2x = x2, p2y = y2, p2z = 0;          // Bottom end
+    const p3x = x2, p3y = y2, p3z = height;     // Top end
+    const p4x = x1, p4y = y1, p4z = height;     // Top start
+    
+    xml += `
+    <Surface id="surface_${i}" surfaceType="${surfaceType}" 
+             adjacentSpaceId="${adjSpace}" adjacentSpaceId2="${adjSpace}"
+             builtInDaylightSensor="false" constructionId="${materialId}">
+      <Name>${wall.mode === 'exterior' ? 'Exterior' : 'Interior'} Wall ${i}</Name>
+      <Area unit="SquareMeters">${(length * height).toFixed(2)}</Area>
+      <Azimuth>${azimuth.toFixed(0)}</Azimuth>
+      <Tilt>90</Tilt>
+      <CADObjectID>Wall_${i}</CADObjectID>
+      <Vertices>
+        <Vertex>
+          <Coordinates x="${p1x.toFixed(3)}" y="${p1y.toFixed(3)}" z="${p1z.toFixed(3)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${p2x.toFixed(3)}" y="${p2y.toFixed(3)}" z="${p2z.toFixed(3)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${p3x.toFixed(3)}" y="${p3y.toFixed(3)}" z="${p3z.toFixed(3)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${p4x.toFixed(3)}" y="${p4y.toFixed(3)}" z="${p4z.toFixed(3)}"/>
+        </Vertex>
+      </Vertices>
+    </Surface>`;
+  });
+  
+  return xml;
+}
+
+function generateOpeningsXml() {
+  let xml = '';
+  
+  openings.forEach((opening, i) => {
+    const wallIdx = opening.wallIndex;
+    const wall = walls[wallIdx];
+    
+    if (!wall) {
+      console.warn(`Opening ${i} references non-existent wall ${wallIdx}`);
+      return;
+    }
+    
+    const start = wall.worldStart;
+    const end = wall.worldEnd;
+    const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
+    
+    // Convert to meters
+    const x1 = start.x / 1000;
+    const y1 = (TOTAL_Y - start.y) / 1000;
+    const x2 = end.x / 1000;
+    const y2 = (TOTAL_Y - end.y) / 1000;
+    
+    // Position along wall
+    const ratio = Math.max(0.15, Math.min(0.85, opening.position));
+    const px = x1 + (x2 - x1) * ratio;
+    const py = y1 + (y2 - y1) * ratio;
+    
+    const width = opening.width; // Already in meters (0.85)
+    const openingHeight = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
+    const openingBase = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
+    const openingCenterZ = openingBase + openingHeight / 2;
+    
+    const surfaceId = `surface_${wallIdx}`;
+    const openingType = opening.type === 'window' ? 'Window' : 'Door';
+    const materialId = opening.type === 'window' ? 'glazing_double' : 'door_solid';
+    
+    xml += `
+    <Opening id="opening_${i}" openingType="${openingType}" attachedSurfaceId="${surfaceId}">
+      <Name>${openingType}_${i}</Name>
+      <Area unit="SquareMeters">${(width * openingHeight).toFixed(2)}</Area>
+      <Height>${openingHeight.toFixed(2)}</Height>
+      <Width>${width.toFixed(2)}</Width>
+      <DistanceFromFloor>${openingBase.toFixed(2)}</DistanceFromFloor>
+      <DistanceFromEdge>${ratio.toFixed(2)}</DistanceFromEdge>
+      <FractionOfAreaInSurface>${(width * openingHeight / (getWallLength(wall) * WALL_HEIGHT_M)).toFixed(3)}</FractionOfAreaInSurface>
+      <FrameAndDivider>
+        <FrameType>Unknown</FrameType>
+      </FrameAndDivider>
+      <GlassLayers>
+        ${opening.type === 'window' ? '<GlassLayer>Double</GlassLayer>' : ''}
+      </GlassLayers>
+      <UValue>${opening.type === 'window' ? 1.2 : 2.0}</UValue>
+      <SHGC>${opening.type === 'window' ? 0.62 : 0}</SHGC>
+      <VisibleTransmittance>${opening.type === 'window' ? 0.7 : 0}</VisibleTransmittance>
+      <CADMaterialId>${materialId}</CADMaterialId>
+      <Vertices>
+        <Vertex>
+          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${openingBase.toFixed(2)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${(openingBase + openingHeight).toFixed(2)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${(openingBase + openingHeight).toFixed(2)}"/>
+        </Vertex>
+        <Vertex>
+          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${openingBase.toFixed(2)}"/>
+        </Vertex>
+      </Vertices>
+    </Opening>`;
+  });
+  
+  return xml;
+}
+
+function getWallLength(wall) {
+  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
+  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
+  return Math.hypot(dx, dy) / 1000;
 }
 
 function exportAsJSON() {
@@ -883,4 +1075,10 @@ function setMode(mode) {
   selectedPoint = null;
   highlightSelected(null);
   updateStats();
+}
+
+function getWallLength(wall) {
+  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
+  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
+  return Math.hypot(dx, dy) / 1000;
 }
