@@ -5,20 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Segal House Designer</title>
   
-  <!-- FABRIC.JS (2D Canvas) -->
+  <!-- FABRIC.JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   
-  <!-- THREE.JS (3D Visualization) -->
+  <!-- THREE.JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- TOP HEADER & CONTROLS -->
   <header class="top-controls">
     <div class="header-title">
       <h1>🏠 Segal House Designer</h1>
-      <p>900mm Modular Method • Energy Performance Feedback</p>
+      <p>900mm Modular • 3m Ceiling Height • Energy Ready</p>
     </div>
     
     <div class="control-bar">
@@ -39,37 +38,28 @@
           <button id="toggleGrid">📐 Toggle Grid</button>
           <button id="toggle3D">🔄 Toggle 3D</button>
           <button id="clearAll" class="danger">🗑️ Clear All</button>
-          <button id="exportDesign" class="primary">💾 Export JSON</button>
+          <button id="exportDesign" class="secondary">💾 Export JSON</button>
+          <button id="exportGbxML" class="primary">⚡ Export gbXML</button>
         </div>
       </div>
     </div>
   </header>
   
-  <!-- MAIN WORKSPACE -->
   <main class="workspace">
-    <!-- LEFT: 2D Canvas Area -->
     <div class="canvas-area">
       <canvas id="gridCanvas"></canvas>
     </div>
     
-    <!-- RIGHT: 3D Visualization Sidebar -->
     <aside id="three-sidebar">
       <div id="three-canvas"></div>
       <div class="rotate-controls">
         <label>
           <input type="checkbox" id="autoRotate" checked> Auto Rotate
         </label>
-        <div class="panel-toggle">
-          <button id="hide3D" class="secondary">🔽 Hide Panel</button>
-        </div>
       </div>
     </aside>
-    
-    <!-- COLLAPSED 3D BUTTON (shown when panel hidden) -->
-    <button id="show3D" class="floating-btn hidden">🔄 Show 3D</button>
   </main>
   
-  <!-- BOTTOM: Statistics Panel -->
   <footer class="stats-footer">
     <div class="stat-row">
       <span>Total Wall Length:</span>
@@ -97,24 +87,22 @@
     </div>
     <div class="stat-row">
       <span>Instructions:</span>
-      <span id="instructionsText">Select Exterior Wall mode → Click first point → Click second point</span>
+      <span id="instructionsText">Select Exterior Wall → Click first point → Click second point</span>
     </div>
   </footer>
   
-  <!-- Opening Dialog Modal -->
   <div id="openingDialog" class="modal hidden">
     <div class="modal-content">
       <h2>Add Opening</h2>
-      <p>Choose opening type (max 850mm width):</p>
+      <p>Choose opening type:</p>
       <div class="modal-buttons">
-        <button id="windowBtn" class="primary">🪟 Window</button>
-        <button id="doorBtn" class="secondary">🚪 Door</button>
+        <button id="windowBtn" class="primary">🪟 Window<br><small>(0.8m-2.0m)</small></button>
+        <button id="doorBtn" class="secondary">🚪 Door<br><small>(0-2.1m)</small></button>
         <button id="closeDialog" class="danger">Cancel</button>
       </div>
     </div>
   </div>
   
-  <!-- Main Script -->
   <script src="app.js"></script>
 </body>
 </html>
