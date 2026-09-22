@@ -1,10 +1,13 @@
-// Segal House Designer - Final Version with XYZ Coords & Scale
+// Segal House Designer - Energy Modeling Edition
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
 const GRID_PIXEL_SIZE = 90;
 const CANVAS_COLS = 12;
 const CANVAS_ROWS = 10;
-const WALL_HEIGHT_M = 2.4;
+const WALL_HEIGHT_M = 3.0;  // 3 meters
+const WINDOW_START_HEIGHT_M = 0.8;
+const WINDOW_HEIGHT_M = 1.2;
+const DOOR_HEIGHT_M = 2.1;
 const MAX_OPENING_WIDTH = 0.85;
 
 const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
@@ -30,13 +33,12 @@ const fabricCanvas = new fabric.Canvas('gridCanvas', {
 
 // Three.js
 let scene, camera, renderer;
-let walls3DGroup, openings3DGroup, gridPoints3DGroup;
+let walls3DGroup, openings3DGroup, gridPoints3DGroup, floorGroup, roofGroup;
 let autoRotate = true;
 let rotationAngle = 0;
 
-console.log('🚀 Initializing Segal House Designer...');
+console.log('🚀 Initializing Segal House Designer (Energy Mode)...');
 
-// ========== SAFE LINE COORDINATE ACCESS ==========
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) return null;
   const line = wall.fabricObj;
@@ -53,7 +55,6 @@ function getLinePoints(wall) {
   return null;
 }
 
-// ========== INIT ==========
 function initAll() {
   initThree();
   initGridPoints();
@@ -84,7 +85,7 @@ function initThree() {
   
   camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
   camera.position.set(15, 15, 15);
-  camera.lookAt(0, 1, 0);
+  camera.lookAt(0, 1.5, 0);
   
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
@@ -100,21 +101,15 @@ function initThree() {
   walls3DGroup = new THREE.Group();
   openings3DGroup = new THREE.Group();
   gridPoints3DGroup = new THREE.Group();
+  floorGroup = new THREE.Group();
+  roofGroup = new THREE.Group();
   
   scene.add(walls3DGroup);
   scene.add(openings3DGroup);
   scene.add(gridPoints3DGroup);
+  scene.add(floorGroup);
+  scene.add(roofGroup);
   
-  // Ground plane
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(20, 20),
-    new THREE.MeshPhongMaterial({ color: 0xf0f0f0 })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.1;
-  scene.add(ground);
-  
-  // Mouse controls
   let isDragging = false, prevMouse = { x: 0, y: 0 };
   const canvas3D = renderer.domElement;
   
@@ -126,7 +121,7 @@ function initThree() {
       rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
       camera.position.x = Math.sin(rotationAngle) * 15;
       camera.position.z = Math.cos(rotationAngle) * 15;
-      camera.lookAt(0, 1, 0);
+      camera.lookAt(0, 1.5, 0);
     }
     prevMouse = { x: e.offsetX, y: e.offsetY };
   });
@@ -150,8 +145,9 @@ function renderThreeScene() {
   while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
+  while(floorGroup.children.length) floorGroup.remove(floorGroup.children[0]);
+  while(roofGroup.children.length) roofGroup.remove(roofGroup.children[0]);
   
-  // Center origin
   const cx = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   const cz = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   
@@ -181,7 +177,9 @@ function renderThreeScene() {
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
     
     const wallMat = new THREE.MeshPhongMaterial({
-      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7
+      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7,
+      transparent: true,
+      opacity: 0.85
     });
     const wallMesh = new THREE.Mesh(
       new THREE.BoxGeometry(length, WALL_HEIGHT_M, 0.15),
@@ -202,15 +200,16 @@ function renderThreeScene() {
       const ox = start.x + (end.x - start.x) * ratio;
       const oz = start.z + (end.z - start.z) * ratio;
       
-      const openingHeight = opening.type === 'door' ? 2.1 : 1.4;
-      const openingDepth = 0.16;
+      const openingHeight = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
+      const openingStart = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
       
       let openingMat;
-      
       if (opening.type === 'door') {
         openingMat = new THREE.MeshPhongMaterial({
           color: 0xff9800,
-          side: THREE.DoubleSide
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.6
         });
       } else {
         openingMat = new THREE.MeshPhongMaterial({
@@ -224,18 +223,71 @@ function renderThreeScene() {
       }
       
       const openingMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(opening.width, openingHeight, openingDepth),
+        new THREE.BoxGeometry(opening.width, openingHeight, 0.16),
         openingMat
       );
       openingMesh.position.set(
         ox,
-        opening.type === 'door' ? openingHeight / 2 : WALL_HEIGHT_M / 2,
+        openingStart + openingHeight / 2,
         oz
       );
       openingMesh.rotation.y = -angle;
       openings3DGroup.add(openingMesh);
     });
   });
+  
+  // FLOOR - Create from wall bounds
+  if (walls.length > 0) {
+    let minX = Infinity, maxX = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    walls.forEach(wall => {
+      const start = gridToWorld(wall.pointA.col, wall.pointA.row);
+      const end = gridToWorld(wall.pointB.col, wall.pointB.row);
+      minX = Math.min(minX, start.x, end.x);
+      maxX = Math.max(maxX, start.x, end.x);
+      minZ = Math.min(minZ, start.z, end.z);
+      maxZ = Math.max(maxZ, start.z, end.z);
+    });
+    
+    const floorWidth = maxX - minX;
+    const floorDepth = maxZ - minZ;
+    
+    if (floorWidth > 0 && floorDepth > 0) {
+      const floorMat = new THREE.MeshPhongMaterial({ color: 0xd2b48c, transparent: true, opacity: 0.9 });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(floorWidth + 1, floorDepth + 1), floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+      floor.receiveShadow = true;
+      floorGroup.add(floor);
+    }
+  }
+  
+  // ROOF - Same as floor but at ceiling height
+  if (walls.length > 0) {
+    let minX = Infinity, maxX = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    walls.forEach(wall => {
+      const start = gridToWorld(wall.pointA.col, wall.pointA.row);
+      const end = gridToWorld(wall.pointB.col, wall.pointB.row);
+      minX = Math.min(minX, start.x, end.x);
+      maxX = Math.max(maxX, start.x, end.x);
+      minZ = Math.min(minZ, start.z, end.z);
+      maxZ = Math.max(maxZ, start.z, end.z);
+    });
+    
+    const roofWidth = maxX - minX;
+    const roofDepth = maxZ - minZ;
+    
+    if (roofWidth > 0 && roofDepth > 0) {
+      const roofMat = new THREE.MeshPhongMaterial({ color: 0x8b4513, transparent: true, opacity: 0.7 });
+      const roof = new THREE.Mesh(new THREE.PlaneGeometry(roofWidth + 1, roofDepth + 1), roofMat);
+      roof.rotation.x = Math.PI / 2;
+      roof.position.set((minX + maxX) / 2, WALL_HEIGHT_M, (minZ + maxZ) / 2);
+      roofGroup.add(roof);
+    }
+  }
   
   animate();
 }
@@ -246,7 +298,7 @@ function animate() {
     rotationAngle += 0.005;
     camera.position.x = Math.sin(rotationAngle) * 15;
     camera.position.z = Math.cos(rotationAngle) * 15;
-    camera.lookAt(0, 1, 0);
+    camera.lookAt(0, 1.5, 0);
   }
   renderer.render(scene, camera);
 }
@@ -268,7 +320,6 @@ function initGridPoints() {
         hasBorders: false
       });
       point.gridData = { col: c, row: r };
-      // Store world coordinates (mm from corner)
       point.worldPos = { x: c * MODULE_SIZE, y: r * MODULE_SIZE };
       gridPoints.push(point);
       fabricCanvas.add(point);
@@ -280,7 +331,6 @@ function drawGridLines() {
   const ctx = fabricCanvas.getContext();
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   
-  // Light gray grid lines
   ctx.strokeStyle = '#e0e0e0';
   ctx.lineWidth = 1;
   
@@ -293,7 +343,6 @@ function drawGridLines() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
   }
   
-  // COLUMN NUMBERS (top)
   ctx.font = 'bold 10px Arial';
   ctx.fillStyle = '#666';
   ctx.textAlign = 'center';
@@ -304,44 +353,16 @@ function drawGridLines() {
     ctx.fillText(`${c}`, x, 5);
   }
   
-  // ROW NUMBERS (left)
   for (let r = 0; r <= CANVAS_ROWS; r++) {
     const y = r * GRID_PIXEL_SIZE;
     ctx.fillText(`${r}`, 5, y);
   }
   
-  // DIMENSION LINES (below grid)
-  ctx.font = '11px Arial';
+  ctx.font = 'bold 11px Arial';
   ctx.fillStyle = '#6d4aff';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   
-  // Draw dimension labels at 900mm intervals
-  for (let c = 0; c <= CANVAS_COLS; c++) {
-    const x = c * GRID_PIXEL_SIZE;
-    const label = `${c * 0.9}m`;
-    ctx.fillText(label, x, CANVAS_HEIGHT + 12);
-  }
-  
-  // Draw dimension lines at bottom
-  ctx.strokeStyle = '#6d4aff';
-  ctx.lineWidth = 1;
-  const dimY = CANVAS_HEIGHT + 18;
-  ctx.beginPath();
-  ctx.moveTo(0, dimY);
-  ctx.lineTo(CANVAS_WIDTH, dimY);
-  ctx.stroke();
-  
-  // Tick marks at each grid line
-  for (let c = 0; c <= CANVAS_COLS; c++) {
-    const x = c * GRID_PIXEL_SIZE;
-    ctx.beginPath();
-    ctx.moveTo(x, dimY - 5);
-    ctx.lineTo(x, dimY + 5);
-    ctx.stroke();
-  }
-  
-  // WALL LENGTH LABELS (on walls)
   walls.forEach((wall) => {
     const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
     const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
@@ -350,8 +371,6 @@ function drawGridLines() {
     const midX = (wall.pointA.left + wall.pointB.left) / 2;
     const midY = (wall.pointA.top + wall.pointB.top) / 2;
     
-    ctx.font = 'bold 11px Arial';
-    ctx.fillStyle = '#6d4aff';
     ctx.fillText(`${len.toFixed(1)}m`, midX, midY);
   });
 }
@@ -361,6 +380,28 @@ function getClosestGridPoint(x, y, tol = 20) {
 }
 
 function createWall(pointA, pointB) {
+  // ENFORCE AXIS-ALIGNED ONLY (horizontal or vertical)
+  if (pointA.gridData.col !== pointB.gridData.col && pointA.gridData.row !== pointB.gridData.row) {
+    console.warn('⚠️ Diagonal walls not allowed. Creating axis-aligned wall instead.');
+    // Snap to nearest axis - prefer longer segment
+    const dx = Math.abs(pointB.gridData.col - pointA.gridData.col);
+    const dy = Math.abs(pointB.gridData.row - pointA.gridData.row);
+    
+    if (dx >= dy) {
+      // Horizontal - snap y
+      pointB.gridData.row = pointA.gridData.row;
+      pointB.worldPos.y = pointA.worldPos.y;
+      pointB.left = pointB.gridData.col * GRID_PIXEL_SIZE;
+      pointB.top = pointA.top;
+    } else {
+      // Vertical - snap x
+      pointB.gridData.col = pointA.gridData.col;
+      pointB.worldPos.x = pointA.worldPos.x;
+      pointB.left = pointA.left;
+      pointB.top = pointB.gridData.row * GRID_PIXEL_SIZE;
+    }
+  }
+  
   const line = new fabric.Line([
     pointA.left, pointA.top,
     pointB.left, pointB.top
@@ -585,7 +626,7 @@ function updateStats() {
     
     if (wall.mode === 'exterior') {
       extLen += len;
-      heatLoss += len * wall.uValue * deltaT;
+      heatLoss += len * WALL_HEIGHT_M * wall.uValue * deltaT;
     } else {
       intLen += len;
     }
@@ -596,8 +637,9 @@ function updateStats() {
     if (wall?.mode === 'exterior') {
       const wallU = wall.uValue;
       const openingU = opening.type === 'door' ? 2.0 : 1.2;
-      heatLoss -= opening.width * wallU * deltaT;
-      heatLoss += opening.width * openingU * deltaT;
+      const openingArea = opening.width * (opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M);
+      heatLoss -= opening.width * WALL_HEIGHT_M * wallU * deltaT;
+      heatLoss += openingArea * openingU * deltaT;
     }
   });
   
@@ -611,15 +653,15 @@ function updateStats() {
   document.getElementById('heatLoss').textContent = `${heatLoss.toFixed(1)} W/K`;
   
   const instr = {
-    exterior: 'Select Exterior Wall → Click first point → Click second point',
-    interior: 'Select Interior Wall → Click first point → Click second point',
-    opening: 'Select Add Opening → Click ON a wall line → Choose window or door (max 850mm)',
+    exterior: 'Select Exterior Wall → Click first point → Click second point (axis-aligned only)',
+    interior: 'Select Interior Wall → Click first point → Click second point (axis-aligned only)',
+    opening: 'Select Add Opening → Click ON a wall → Choose window (0.8-2.0m) or door (0-2.1m)',
     delete: 'Select Delete → Click on wall to remove'
   };
   document.getElementById('instructionsText').textContent = instr[currentMode];
 }
 
-// ========== LOAD/SAVE WITH X,Y COORDINATES ==========
+// ========== LOAD/SAVE ==========
 function loadDesignFromURL() {
   const params = new URLSearchParams(window.location.search);
   const encoded = params.get('design');
@@ -668,6 +710,121 @@ function loadDesign(data) {
   renderThreeScene();
 }
 
+// ========== EXPORT FUNCTIONS ==========
+function exportAsGbXML() {
+  const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
+  const timestamp = new Date().toISOString();
+  
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<gbXML xmlns="http://gbxml.org/schema/gbXML_v6_01" schemaVersion="6_01" timeZone="-8" surfaceType="RoofFloor" useSIUnitsForResults="true" temperatureUnit="Celsius">
+  <Name>Segal House Design</Name>
+  <Description>Walter Segal modular housing - Energy Model</Description>
+  <Location>
+    <City>Lumo</City>
+    <Country>United Kingdom</Country>
+  </Location>
+  <Materials>
+    <Material id="concrete_wall"><Name>Concrete Block Wall</Name><U-value unit="W/(m^2-K)">0.35</U-value></Material>
+    <Material id="window_glazing"><Name>Double Glazed Window</Name><U-value unit="W/(m^2-K)">1.2</U-value></Material>
+    <Material id="door_solid"><Name>Solid Door</Name><U-value unit="W/(m^2-K)">2.0</U-value></Material>
+  </Materials>
+  <Surfaces>`;
+  
+  walls.forEach((wall, i) => {
+    const start = wall.worldStart;
+    const end = wall.worldEnd;
+    const x1 = start.x / 1000;
+    const y1 = (TOTAL_Y - start.y) / 1000;
+    const x2 = end.x / 1000;
+    const y2 = (TOTAL_Y - end.y) / 1000;
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    const centerX = (x1 + x2) / 2;
+    const centerY = (y1 + y2) / 2;
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const azim = (angle * 180 / Math.PI) % 360;
+    const surfaceType = wall.mode === 'exterior' ? 'Wall' : 'InteriorWall';
+    const adjSurface = wall.mode === 'exterior' ? 'Ground' : 'interior_zone';
+    
+    xml += `
+    <Surface id="surface_${i}" surfaceType="${surfaceType}" adjacentSpaceId="${adjSurface}">
+      <Name>${wall.mode} Wall ${i}</Name>
+      <CADMaterialId>concrete_wall</CADMaterialId>
+      <Area unit="SquareMeters">${(length * WALL_HEIGHT_M).toFixed(2)}</Area>
+      <Azimuth>${azim.toFixed(1)}</Azimuth><Tilt>90</Tilt>
+      <RectangularGeometry coordinateSystem="WorldCS">
+        <Origin x="${centerX.toFixed(3)}" y="${centerY.toFixed(3)}" z="${(WALL_HEIGHT_M/2).toFixed(3)}"/>
+        <xDir x="${Math.cos(angle).toFixed(3)}" y="${Math.sin(angle).toFixed(3)}" z="0"/>
+        <zDir x="0" y="0" z="1"/>
+      </RectangularGeometry>
+    </Surface>`;
+  });
+  
+  xml += `</Surfaces><Openings>`;
+  
+  openings.forEach((opening, i) => {
+    const wall = walls[opening.wallIndex];
+    if (!wall) return;
+    const width = opening.width;
+    const height = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
+    const openingType = opening.type === 'window' ? 'Window' : 'Door';
+    const materialId = opening.type === 'window' ? 'window_glazing' : 'door_solid';
+    const surfaceId = `surface_${opening.wallIndex}`;
+    
+    xml += `
+    <Opening id="opening_${i}" openingType="${openingType}">
+      <Name>${openingType} ${i}</Name>
+      <CADMaterialId>${materialId}</CADMaterialId>
+      <Area unit="SquareMeters">${(width * height).toFixed(2)}</Area>
+      <AttachedToSurface>${surfaceId}</AttachedToSurface>
+      <RectangleGeometry>
+        <Origin x="0" y="0" z="${(opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M + height/2).toFixed(3)}"/>
+        <Length unit="Meters">${width.toFixed(3)}</Length>
+        <Width unit="Meters">${height.toFixed(3)}</Width>
+      </RectangleGeometry>
+    </Opening>`;
+  });
+  
+  xml += `</Openings></gbXML>`;
+  
+  const blob = new Blob([xml], { type: 'text/xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `segal-gbxml-${Date.now()}.xml`;
+  a.click();
+}
+
+function exportAsJSON() {
+  const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
+  
+  const data = {
+    version: '2.0',
+    unit: 'mm',
+    walls: walls.map(w => ({
+      mode: w.mode,
+      uValue: w.uValue,
+      start: { x: w.worldStart.x, y: TOTAL_Y - w.worldStart.y },
+      end: { x: w.worldEnd.x, y: TOTAL_Y - w.worldEnd.y }
+    })),
+    openings: openings.map(o => {
+      const wall = walls[o.wallIndex];
+      return {
+        type: o.type,
+        width: o.width * 1000,
+        positionRatio: o.position,
+        wallStart: { x: wall.worldStart.x, y: TOTAL_Y - wall.worldStart.y },
+        wallEnd: { x: wall.worldEnd.x, y: TOTAL_Y - wall.worldEnd.y }
+      };
+    }),
+    timestamp: Date.now()
+  };
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `segal-${Date.now()}.json`;
+  a.click();
+}
+
 // ========== EVENT LISTENERS ==========
 function setupEventListeners() {
   document.getElementById('modeExterior').onclick = () => setMode('exterior');
@@ -684,27 +841,7 @@ function setupEventListeners() {
   };
   
   document.getElementById('toggle3D').onclick = () => {
-    const sidebar = document.getElementById('three-sidebar');
-    const hideBtn = document.getElementById('hide3D');
-    const showBtn = document.getElementById('show3D');
-    
-    sidebar.classList.toggle('hidden');
-    
-    if (sidebar.classList.contains('hidden')) {
-      hideBtn.classList.add('hidden');
-      showBtn.classList.remove('hidden');
-    } else {
-      hideBtn.classList.remove('hidden');
-      showBtn.classList.add('hidden');
-    }
-  };
-  
-  document.getElementById('hide3D').onclick = () => {
-    document.getElementById('toggle3D').click();
-  };
-  
-  document.getElementById('show3D').onclick = () => {
-    document.getElementById('toggle3D').click();
+    document.getElementById('three-sidebar').classList.toggle('hidden');
   };
   
   document.getElementById('autoRotate').onchange = (e) => autoRotate = e.target.checked;
@@ -723,44 +860,8 @@ function setupEventListeners() {
     }
   };
   
-  document.getElementById('exportDesign').onclick = () => {
-    // EXPORT WITH WORLD COORDINATES (mm)
-    const data = {
-      version: '1.0',
-      unit: 'mm',
-      moduleSize: MODULE_SIZE,
-      walls: walls.map(w => ({
-        mode: w.mode,
-        uValue: w.uValue,
-        start: { x: w.worldStart.x, y: w.worldStart.y },
-        end: { x: w.worldEnd.x, y: w.worldEnd.y }
-      })),
-      openings: openings.map(o => {
-        const wall = walls[o.wallIndex];
-        const startX = wall.worldStart.x;
-        const startY = wall.worldStart.y;
-        const endX = wall.worldEnd.x;
-        const endY = wall.worldEnd.y;
-        return {
-          type: o.type,
-          width: o.width * 1000, // Convert m to mm
-          positionRatio: o.position,
-          start: { x: startX + (endX - startX) * o.position, y: startY + (endY - startY) * o.position },
-          wallStart: { x: startX, y: startY },
-          wallEnd: { x: endX, y: endY }
-        };
-      }),
-      timestamp: Date.now()
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `segal-${Date.now()}.json`;
-    a.click();
-    
-    console.log('Exported with world coordinates (mm):', data);
-  };
+  document.getElementById('exportDesign').onclick = () => exportAsJSON();
+  document.getElementById('exportGbxML').onclick = () => exportAsGbXML();
   
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
