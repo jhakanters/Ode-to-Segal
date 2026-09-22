@@ -710,11 +710,11 @@ function loadDesign(data) {
   renderThreeScene();
 }
 
-// ========== FINAL FIXED GBXML EXPORT ==========
+// ========== OPENSTUDIO-COMPATIBLE GBXML (FIXED) ==========
 function exportAsGbXML() {
   const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
   
-  // Calculate bounding box for floor area
+  // Calculate bounds for floor/roof
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   walls.forEach(wall => {
     const x1 = wall.worldStart.x / 1000;
@@ -727,69 +727,92 @@ function exportAsGbXML() {
     maxZ = Math.max(maxZ, z1, z2);
   });
   
-  const floorArea = (maxX - minX) * (maxZ - minZ) || 0;
+  const floorWidth = maxX - minX;
+  const floorDepth = maxZ - minZ;
+  const floorArea = floorWidth * floorDepth || 10;
+  const ceilingHeight = WALL_HEIGHT_M;
+  const volume = floorArea * ceilingHeight;
   
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <gbXML xmlns="http://www.gbxml.org/schema/gbXML" 
-       useSIUnitsForResults="true" temperatureUnit="Celsius" 
-       lengthUnit="Meter" areaUnit="SquareMeters" volumeUnit="CubicMeter">
+       schemaVersion="6-01" 
+       useSIUnitsForResults="true" 
+       temperatureUnit="Celsius" 
+       lengthUnit="Meter" 
+       areaUnit="SquareMeters" 
+       volumeUnit="CubicMeter">
   
   <Name>Segal House</Name>
+  <Description>Walter Segal Modular Design</Description>
   <TemperatureUnit>Celsius</TemperatureUnit>
   <LengthUnit>Meter</LengthUnit>
   <AreaUnit>SquareMeters</AreaUnit>
+  <VolumeUnit>CubicMeter</VolumeUnit>
   
   <Location>
     <Latitude>51.5074</Latitude>
     <Longitude>-0.1278</Longitude>
+    <Elevation>11</Elevation>
   </Location>
   
+  <!-- MATERIALS -->
   <Materials>
     <Material id="mat_wall" materialType="Opaque">
-      <Name>Concrete Block Wall</Name>
+      <Name>Concrete Wall</Name>
       <UValue>0.35</UValue>
       <Absorptance>0.8</Absorptance>
-      <Emittance>0.9</Emittance>
     </Material>
     <Material id="mat_window" materialType="Glazing">
-      <Name>Double Glazing</Name>
+      <Name>Window Glazing</Name>
       <UValue>1.2</UValue>
       <SHGC>0.62</SHGC>
       <VisibleTransmittance>0.7</VisibleTransmittance>
     </Material>
     <Material id="mat_door" materialType="Opaque">
-      <Name>Solid Door</Name>
+      <Name>Door</Name>
       <UValue>2.0</UValue>
     </Material>
     <Material id="mat_floor" materialType="Opaque">
-      <Name>Floor Slab</Name>
+      <Name>Floor</Name>
       <UValue>0.25</UValue>
     </Material>
     <Material id="mat_roof" materialType="Opaque">
-      <Name>Roof Slab</Name>
+      <Name>Roof</Name>
       <UValue>0.35</UValue>
     </Material>
   </Materials>
   
+  <!-- BUILDING STORIES (REQUIRED FOR SPACE DISPLAY) -->
+  <BuildingStories>
+    <BuildingStory id="story_ground">
+      <Name>Ground Floor</Name>
+      <StoryOffset>${ceilingHeight / 2}</StoryOffset>
+    </BuildingStory>
+  </BuildingStories>
+  
+  <!-- THERMAL ZONES -->
   <ThermalZones>
-    <ThermalZone id="zone_residential">
+    <ThermalZone id="zone_main">
       <Name>Residential Zone</Name>
     </ThermalZone>
   </ThermalZones>
   
+  <!-- SPACES (must reference building story AND thermal zone) -->
   <Spaces>
     <Space id="space_main">
-      <Name>Main Space</Name>
-      <ThermalZoneId>zone_residential</ThermalZoneId>
+      <Name>Main Interior Space</Name>
+      <BuildingStoryId>story_ground</BuildingStoryId>
+      <ThermalZoneId>zone_main</ThermalZoneId>
       <FloorArea>${floorArea.toFixed(2)}</FloorArea>
-      <CeilingHeight>${WALL_HEIGHT_M}</CeilingHeight>
-      <Volume>${(floorArea * WALL_HEIGHT_M).toFixed(2)}</Volume>
+      <CeilingHeight>${ceilingHeight.toFixed(1)}</CeilingHeight>
+      <Volume>${volume.toFixed(2)}</Volume>
+      <FloorElevation>0</FloorElevation>
     </Space>
   </Spaces>
   
+  <!-- SURFACES -->
   <Surfaces>`;
   
-  // Generate walls with CORRECT vertex ordering
   walls.forEach((wall, i) => {
     const start = wall.worldStart;
     const end = wall.worldEnd;
@@ -802,30 +825,24 @@ function exportAsGbXML() {
     const length = Math.hypot(x2 - x1, y2 - y1);
     const height = WALL_HEIGHT_M;
     
-    // Azimuth from NORTH, clockwise
     let angle = Math.atan2(y2 - y1, x2 - x1);
     let azimuth = (90 - angle * 180 / Math.PI) % 360;
     if (azimuth < 0) azimuth += 360;
     
     const isExterior = wall.mode === 'exterior';
     const surfaceType = isExterior ? 'Wall' : 'InteriorWall';
+    const adjSpace = isExterior ? 'outdoors' : 'space_main';
     
-    // Four vertices: BOTTOM-RIGHT, BOTTOM-LEFT, TOP-LEFT, TOP-RIGHT
-    // Counter-clockwise when viewed from OUTSIDE (normal points INSIDE)
-    // Start bottom-right, go counter-clockwise
     const p1 = { x: x1, y: y1, z: 0 };
     const p2 = { x: x2, y: y2, z: 0 };
     const p3 = { x: x2, y: y2, z: height };
     const p4 = { x: x1, y: y1, z: height };
     
-    const adjSpace = isExterior ? 'outdoors' : 'space_main';
-    const adjObjectType = isExterior ? 'Outdoors' : 'Ground';
-    
     xml += `
-    <Surface id="surf_wall_${i}" surfaceType="${surfaceType}" 
-             adjacentSpaceId="${adjSpace}" adjacentSpaceId2="${adjSpace}"
-             buildingSurfaceType="Vertical" aboveGrade="true">
-      <Name>Wall_${i}_${wall.mode}</Name>
+    <Surface id="surf_${i}" surfaceType="${surfaceType}" 
+             adjacentSpaceId="${adjSpace}"
+             aboveGrade="${isExterior ? 'true' : 'false'}">
+      <Name>${wall.mode}_wall_${i}</Name>
       <Area>${(length * height).toFixed(2)}</Area>
       <Azimuth>${azimuth.toFixed(0)}</Azimuth>
       <Tilt>90</Tilt>
@@ -835,57 +852,51 @@ function exportAsGbXML() {
         <Vertex><Coordinates x="${p3.x.toFixed(3)}" y="${p3.y.toFixed(3)}" z="${p3.z.toFixed(3)}"/></Vertex>
         <Vertex><Coordinates x="${p4.x.toFixed(3)}" y="${p4.y.toFixed(3)}" z="${p4.z.toFixed(3)}"/></Vertex>
       </Vertices>
-      <ConstructionId>mat_wall</ConstructionId>
     </Surface>`;
   });
   
-  // Floors
+  // Floor slab
   if (maxX > minX && maxZ > minZ) {
     xml += `
-    <Surface id="surf_floor" surfaceType="Slab" adjacentSpaceId="space_main" 
-             buildingSurfaceType="Horizontal" aboveGrade="false">
-      <Name>Floor</Name>
+    <Surface id="surf_floor" surfaceType="Slab" 
+             adjacentSpaceId="space_main"
+             aboveGrade="false" surfaceType="Ground">
+      <Name>Floor_Slab</Name>
       <Area>${floorArea.toFixed(2)}</Area>
-      <Azimuth>0</Azimuth>
-      <Tilt>0</Tilt>
       <Vertices>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0"/></Vertex>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0.0"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0.0"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0.0"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0.0"/></Vertex>
       </Vertices>
-      <ConstructionId>mat_floor</ConstructionId>
     </Surface>`;
   }
   
-  // Roofs
+  // Roof
   if (maxX > minX && maxZ > minZ) {
     xml += `
-    <Surface id="surf_roof" surfaceType="Roof" adjacentSpaceId="space_main"
-             buildingSurfaceType="Horizontal" aboveGrade="true">
-      <Name>Roof</Name>
+    <Surface id="surf_roof" surfaceType="Roof" 
+             adjacentSpaceId="space_main"
+             aboveGrade="true">
+      <Name>Roof_Slab</Name>
       <Area>${floorArea.toFixed(2)}</Area>
-      <Azimuth>0</Azimuth>
-      <Tilt>0</Tilt>
       <Vertices>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${WALL_HEIGHT_M.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
+        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
       </Vertices>
-      <ConstructionId>mat_roof</ConstructionId>
     </Surface>`;
   }
   
   xml += `
   </Surfaces>
   
-  <SubSurfaces>`;  // Note: OpenStudio calls openings "SubSurfaces"
+  <!-- SUBSURFACES (Openings) -->
+  <SubSurfaces>`;
   
-  // Openings - MUST be on the same plane as parent wall
   openings.forEach((opening, i) => {
-    const wallIdx = opening.wallIndex;
-    const wall = walls[wallIdx];
+    const wall = walls[opening.wallIndex];
     if (!wall) return;
     
     const start = wall.worldStart;
@@ -897,36 +908,24 @@ function exportAsGbXML() {
     const y2 = (TOTAL_Y - end.y) / 1000;
     
     const ratio = Math.max(0.15, Math.min(0.85, opening.position));
-    const pw = x1 + (x2 - x1) * ratio;  // Center point on wall
+    const pw = x1 + (x2 - x1) * ratio;
     const ph = y1 + (y2 - y1) * ratio;
     
-    const width = opening.width;  // meters
+    const width = opening.width;
     const height = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
     const baseZ = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
+    const hw = width / 2;
     
-    const surfaceId = `surf_wall_${wallIdx}`;
-    const type = opening.type === 'window' ? 'Window' : 'Door';
-    const materialId = opening.type === 'window' ? 'mat_window' : 'mat_door';
-    
-    // SubSurface vertices MUST lie ON the wall plane
-    // 4 corners of the opening, all at same distance from wall origin
-    const hw = width / 2;  // Half-width
+    const surfaceId = `surf_${opening.wallIndex}`;
+    const subType = opening.type === 'window' ? 'Window' : 'Door';
     
     xml += `
-    <SubSurface id="sub_${type}_${i}" subSurfaceType="${type}" parentSurfaceId="${surfaceId}">
-      <Name>${type}_${i}</Name>
+    <SubSurface id="sub_${subType}_${i}" subSurfaceType="${subType}" parentSurfaceId="${surfaceId}">
+      <Name>${subType}_${i}</Name>
       <Area>${(width * height).toFixed(2)}</Area>
       <Width>${width.toFixed(2)}</Width>
       <Height>${height.toFixed(2)}</Height>
-      <FrameAndDivider>
-        <FrameType>Unknown</FrameType>
-        <FrameDepth unit="Meters">0.1</FrameDepth>
-        <DividerDepth unit="Meters">0.1</DividerDepth>
-      </FrameAndDivider>
-      <GlassLayers>${opening.type === 'window' ? 'Double' : 'Single'}</GlassLayers>
-      <UValue>${opening.type === 'window' ? 1.2 : 2.0}</UValue>
-      ${opening.type === 'window' ? `<SHGC>0.62</SHGC><VisibleTransmittance>0.7</VisibleTransmittance>` : ''}
-      <ConstructionId>${materialId}</ConstructionId>
+      ${opening.type === 'window' ? `<GlassLayers>Double</GlassLayers>` : ''}
       <Vertices>
         <Vertex><Coordinates x="${(pw - hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
         <Vertex><Coordinates x="${(pw + hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
@@ -944,12 +943,9 @@ function exportAsGbXML() {
   const blob = new Blob([xml], { type: 'text/xml' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `segal-openstudio-${Date.now().toString().slice(-6)}.xml`;
+  a.download = `segal-os-${Date.now().toString().slice(-6)}.xml`;
   a.click();
-  
-  console.log('✅ Fixed OpenStudio gbXML exported!');
 }
-
 function generateWallsXml(TOTAL_Y) {
   let xml = '';
   const spaceRef = 'space_interior';
