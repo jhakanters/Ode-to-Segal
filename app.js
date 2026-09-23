@@ -1,10 +1,10 @@
 // Segal House Designer - Energy Modeling Edition
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
-const GRID_PIXEL_SIZE = 90;
-const CANVAS_COLS = 12;
-const CANVAS_ROWS = 10;
-const WALL_HEIGHT_M = 3.0;  // 3 meters
+const GRID_PIXEL_SIZE = 45;  // Changed from 90 to 45 (smaller visual cells)
+const CANVAS_COLS = 20;      // Changed from 12 to 20 (more columns)
+const CANVAS_ROWS = 15;      // Changed from 10 to 15 (more rows)
+const WALL_HEIGHT_M = 3.0;   // 3 meters
 const WINDOW_START_HEIGHT_M = 0.8;
 const WINDOW_HEIGHT_M = 1.2;
 const DOOR_HEIGHT_M = 2.1;
@@ -21,6 +21,7 @@ let openings = [];
 let gridPoints = [];
 let showGrid = true;
 let pendingOpening = null;
+let canvasScale = 1.0;  // Zoom level (1.0 = 100%)
 
 // Fabric canvas
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
@@ -69,6 +70,29 @@ function initAll() {
 
 initAll();
 
+// ========== ZOOM FUNCTIONS ==========
+function setZoom(scale) {
+  canvasScale = Math.max(0.25, Math.min(2.0, scale));
+  fabricCanvas.setZoom(canvasScale);
+  fabricCanvas.setWidth(CANVAS_WIDTH * canvasScale);
+  fabricCanvas.setHeight(CANVAS_HEIGHT * canvasScale);
+  fabricCanvas.setViewportTransform([canvasScale, 0, 0, canvasScale, 0, 0]);
+  document.getElementById('zoomLevel').textContent = Math.round(canvasScale * 100) + '%';
+  fabricCanvas.requestRenderAll();
+}
+
+function zoomIn() {
+  setZoom(canvasScale * 1.25);
+}
+
+function zoomOut() {
+  setZoom(canvasScale / 1.25);
+}
+
+function resetZoom() {
+  setZoom(1.0);
+}
+
 // ========== THREE.JS ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
@@ -93,7 +117,7 @@ function initThree() {
   container.appendChild(renderer.domElement);
   
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  const dirLight = new THREE.DirLight(0xffffff, 0.8);
   dirLight.position.set(10, 20, 10);
   dirLight.castShadow = true;
   scene.add(dirLight);
@@ -383,18 +407,15 @@ function createWall(pointA, pointB) {
   // ENFORCE AXIS-ALIGNED ONLY (horizontal or vertical)
   if (pointA.gridData.col !== pointB.gridData.col && pointA.gridData.row !== pointB.gridData.row) {
     console.warn('⚠️ Diagonal walls not allowed. Creating axis-aligned wall instead.');
-    // Snap to nearest axis - prefer longer segment
     const dx = Math.abs(pointB.gridData.col - pointA.gridData.col);
     const dy = Math.abs(pointB.gridData.row - pointA.gridData.row);
     
     if (dx >= dy) {
-      // Horizontal - snap y
       pointB.gridData.row = pointA.gridData.row;
       pointB.worldPos.y = pointA.worldPos.y;
       pointB.left = pointB.gridData.col * GRID_PIXEL_SIZE;
       pointB.top = pointA.top;
     } else {
-      // Vertical - snap x
       pointB.gridData.col = pointA.gridData.col;
       pointB.worldPos.x = pointA.worldPos.x;
       pointB.left = pointA.left;
@@ -710,399 +731,6 @@ function loadDesign(data) {
   renderThreeScene();
 }
 
-// ========== OPENSTUDIO-COMPATIBLE GBXML (FIXED) ==========
-function exportAsGbXML() {
-  const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
-  
-  // Calculate bounds for floor/roof
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  walls.forEach(wall => {
-    const x1 = wall.worldStart.x / 1000;
-    const z1 = (TOTAL_Y - wall.worldStart.y) / 1000;
-    const x2 = wall.worldEnd.x / 1000;
-    const z2 = (TOTAL_Y - wall.worldEnd.y) / 1000;
-    minX = Math.min(minX, x1, x2);
-    maxX = Math.max(maxX, x1, x2);
-    minZ = Math.min(minZ, z1, z2);
-    maxZ = Math.max(maxZ, z1, z2);
-  });
-  
-  const floorWidth = maxX - minX;
-  const floorDepth = maxZ - minZ;
-  const floorArea = floorWidth * floorDepth || 10;
-  const ceilingHeight = WALL_HEIGHT_M;
-  const volume = floorArea * ceilingHeight;
-  
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<gbXML xmlns="http://www.gbxml.org/schema/gbXML" 
-       schemaVersion="6-01" 
-       useSIUnitsForResults="true" 
-       temperatureUnit="Celsius" 
-       lengthUnit="Meter" 
-       areaUnit="SquareMeters" 
-       volumeUnit="CubicMeter">
-  
-  <Name>Segal House</Name>
-  <Description>Walter Segal Modular Design</Description>
-  <TemperatureUnit>Celsius</TemperatureUnit>
-  <LengthUnit>Meter</LengthUnit>
-  <AreaUnit>SquareMeters</AreaUnit>
-  <VolumeUnit>CubicMeter</VolumeUnit>
-  
-  <Location>
-    <Latitude>51.5074</Latitude>
-    <Longitude>-0.1278</Longitude>
-    <Elevation>11</Elevation>
-  </Location>
-  
-  <!-- MATERIALS -->
-  <Materials>
-    <Material id="mat_wall" materialType="Opaque">
-      <Name>Concrete Wall</Name>
-      <UValue>0.35</UValue>
-      <Absorptance>0.8</Absorptance>
-    </Material>
-    <Material id="mat_window" materialType="Glazing">
-      <Name>Window Glazing</Name>
-      <UValue>1.2</UValue>
-      <SHGC>0.62</SHGC>
-      <VisibleTransmittance>0.7</VisibleTransmittance>
-    </Material>
-    <Material id="mat_door" materialType="Opaque">
-      <Name>Door</Name>
-      <UValue>2.0</UValue>
-    </Material>
-    <Material id="mat_floor" materialType="Opaque">
-      <Name>Floor</Name>
-      <UValue>0.25</UValue>
-    </Material>
-    <Material id="mat_roof" materialType="Opaque">
-      <Name>Roof</Name>
-      <UValue>0.35</UValue>
-    </Material>
-  </Materials>
-  
-  <!-- BUILDING STORIES (REQUIRED FOR SPACE DISPLAY) -->
-  <BuildingStories>
-    <BuildingStory id="story_ground">
-      <Name>Ground Floor</Name>
-      <StoryOffset>${ceilingHeight / 2}</StoryOffset>
-    </BuildingStory>
-  </BuildingStories>
-  
-  <!-- THERMAL ZONES -->
-  <ThermalZones>
-    <ThermalZone id="zone_main">
-      <Name>Residential Zone</Name>
-    </ThermalZone>
-  </ThermalZones>
-  
-  <!-- SPACES (must reference building story AND thermal zone) -->
-  <Spaces>
-    <Space id="space_main">
-      <Name>Main Interior Space</Name>
-      <BuildingStoryId>story_ground</BuildingStoryId>
-      <ThermalZoneId>zone_main</ThermalZoneId>
-      <FloorArea>${floorArea.toFixed(2)}</FloorArea>
-      <CeilingHeight>${ceilingHeight.toFixed(1)}</CeilingHeight>
-      <Volume>${volume.toFixed(2)}</Volume>
-      <FloorElevation>0</FloorElevation>
-    </Space>
-  </Spaces>
-  
-  <!-- SURFACES -->
-  <Surfaces>`;
-  
-  walls.forEach((wall, i) => {
-    const start = wall.worldStart;
-    const end = wall.worldEnd;
-    
-    const x1 = start.x / 1000;
-    const y1 = (TOTAL_Y - start.y) / 1000;
-    const x2 = end.x / 1000;
-    const y2 = (TOTAL_Y - end.y) / 1000;
-    
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    const height = WALL_HEIGHT_M;
-    
-    let angle = Math.atan2(y2 - y1, x2 - x1);
-    let azimuth = (90 - angle * 180 / Math.PI) % 360;
-    if (azimuth < 0) azimuth += 360;
-    
-    const isExterior = wall.mode === 'exterior';
-    const surfaceType = isExterior ? 'Wall' : 'InteriorWall';
-    const adjSpace = isExterior ? 'outdoors' : 'space_main';
-    
-    const p1 = { x: x1, y: y1, z: 0 };
-    const p2 = { x: x2, y: y2, z: 0 };
-    const p3 = { x: x2, y: y2, z: height };
-    const p4 = { x: x1, y: y1, z: height };
-    
-    xml += `
-    <Surface id="surf_${i}" surfaceType="${surfaceType}" 
-             adjacentSpaceId="${adjSpace}"
-             aboveGrade="${isExterior ? 'true' : 'false'}">
-      <Name>${wall.mode}_wall_${i}</Name>
-      <Area>${(length * height).toFixed(2)}</Area>
-      <Azimuth>${azimuth.toFixed(0)}</Azimuth>
-      <Tilt>90</Tilt>
-      <Vertices>
-        <Vertex><Coordinates x="${p1.x.toFixed(3)}" y="${p1.y.toFixed(3)}" z="${p1.z.toFixed(3)}"/></Vertex>
-        <Vertex><Coordinates x="${p2.x.toFixed(3)}" y="${p2.y.toFixed(3)}" z="${p2.z.toFixed(3)}"/></Vertex>
-        <Vertex><Coordinates x="${p3.x.toFixed(3)}" y="${p3.y.toFixed(3)}" z="${p3.z.toFixed(3)}"/></Vertex>
-        <Vertex><Coordinates x="${p4.x.toFixed(3)}" y="${p4.y.toFixed(3)}" z="${p4.z.toFixed(3)}"/></Vertex>
-      </Vertices>
-    </Surface>`;
-  });
-  
-  // Floor slab
-  if (maxX > minX && maxZ > minZ) {
-    xml += `
-    <Surface id="surf_floor" surfaceType="Slab" 
-             adjacentSpaceId="space_main"
-             aboveGrade="false" surfaceType="Ground">
-      <Name>Floor_Slab</Name>
-      <Area>${floorArea.toFixed(2)}</Area>
-      <Vertices>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0.0"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="0.0"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0.0"/></Vertex>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="0.0"/></Vertex>
-      </Vertices>
-    </Surface>`;
-  }
-  
-  // Roof
-  if (maxX > minX && maxZ > minZ) {
-    xml += `
-    <Surface id="surf_roof" surfaceType="Roof" 
-             adjacentSpaceId="space_main"
-             aboveGrade="true">
-      <Name>Roof_Slab</Name>
-      <Area>${floorArea.toFixed(2)}</Area>
-      <Vertices>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${minX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${minZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
-        <Vertex><Coordinates x="${maxX.toFixed(3)}" y="${maxZ.toFixed(3)}" z="${ceilingHeight.toFixed(1)}"/></Vertex>
-      </Vertices>
-    </Surface>`;
-  }
-  
-  xml += `
-  </Surfaces>
-  
-  <!-- SUBSURFACES (Openings) -->
-  <SubSurfaces>`;
-  
-  openings.forEach((opening, i) => {
-    const wall = walls[opening.wallIndex];
-    if (!wall) return;
-    
-    const start = wall.worldStart;
-    const end = wall.worldEnd;
-    
-    const x1 = start.x / 1000;
-    const y1 = (TOTAL_Y - start.y) / 1000;
-    const x2 = end.x / 1000;
-    const y2 = (TOTAL_Y - end.y) / 1000;
-    
-    const ratio = Math.max(0.15, Math.min(0.85, opening.position));
-    const pw = x1 + (x2 - x1) * ratio;
-    const ph = y1 + (y2 - y1) * ratio;
-    
-    const width = opening.width;
-    const height = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
-    const baseZ = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
-    const hw = width / 2;
-    
-    const surfaceId = `surf_${opening.wallIndex}`;
-    const subType = opening.type === 'window' ? 'Window' : 'Door';
-    
-    xml += `
-    <SubSurface id="sub_${subType}_${i}" subSurfaceType="${subType}" parentSurfaceId="${surfaceId}">
-      <Name>${subType}_${i}</Name>
-      <Area>${(width * height).toFixed(2)}</Area>
-      <Width>${width.toFixed(2)}</Width>
-      <Height>${height.toFixed(2)}</Height>
-      ${opening.type === 'window' ? `<GlassLayers>Double</GlassLayers>` : ''}
-      <Vertices>
-        <Vertex><Coordinates x="${(pw - hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
-        <Vertex><Coordinates x="${(pw + hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${baseZ.toFixed(2)}"/></Vertex>
-        <Vertex><Coordinates x="${(pw + hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${(baseZ + height).toFixed(2)}"/></Vertex>
-        <Vertex><Coordinates x="${(pw - hw).toFixed(3)}" y="${ph.toFixed(3)}" z="${(baseZ + height).toFixed(2)}"/></Vertex>
-      </Vertices>
-    </SubSurface>`;
-  });
-  
-  xml += `
-  </SubSurfaces>
-  
-</gbXML>`;
-  
-  const blob = new Blob([xml], { type: 'text/xml' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `segal-os-${Date.now().toString().slice(-6)}.xml`;
-  a.click();
-}
-function generateWallsXml(TOTAL_Y) {
-  let xml = '';
-  const spaceRef = 'space_interior';
-  
-  walls.forEach((wall, i) => {
-    const start = wall.worldStart;
-    const end = wall.worldEnd;
-    
-    // Convert mm to meters and flip Y axis for standard coordinates
-    const x1 = start.x / 1000;
-    const y1 = (TOTAL_Y - start.y) / 1000;
-    const x2 = end.x / 1000;
-    const y2 = (TOTAL_Y - end.y) / 1000;
-    
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    const thickness = 0.15;
-    const height = WALL_HEIGHT_M; // 3.0m
-    
-    const centerX = (x1 + x2) / 2;
-    const centerY = (y1 + y2) / 2;
-    const centerZ = height / 2;
-    
-    // Calculate wall angle (azimuth from north, clockwise)
-    let angle = Math.atan2(y2 - y1, x2 - x1);
-    let azimuth = (90 - angle * 180 / Math.PI) % 360;
-    if (azimuth < 0) azimuth += 360;
-    
-    // Determine surface type
-    const isExterior = wall.mode === 'exterior';
-    const surfaceType = isExterior ? 'Wall' : 'InterzonalWall';
-    const adjSpace = isExterior ? 'outdoors' : spaceRef;
-    const adjObjectType = isExterior ? 'Outdoors' : 'Ground';
-    
-    // Material assignment
-    const materialId = isExterior ? 'wall_concrete' : 'wall_concrete';
-    
-    // Calculate vertex order for proper normal direction (clockwise when viewed from outside)
-    const cosA = Math.cos(angle);
-    const sinA = Math.sin(angle);
-    
-    // Build four vertices of the wall (bottom-left, bottom-right, top-right, top-left)
-    // Normal should point INWARD to the space (gbXML convention)
-    const p1x = x1, p1y = y1, p1z = 0;           // Bottom start
-    const p2x = x2, p2y = y2, p2z = 0;          // Bottom end
-    const p3x = x2, p3y = y2, p3z = height;     // Top end
-    const p4x = x1, p4y = y1, p4z = height;     // Top start
-    
-    xml += `
-    <Surface id="surface_${i}" surfaceType="${surfaceType}" 
-             adjacentSpaceId="${adjSpace}" adjacentSpaceId2="${adjSpace}"
-             builtInDaylightSensor="false" constructionId="${materialId}">
-      <Name>${wall.mode === 'exterior' ? 'Exterior' : 'Interior'} Wall ${i}</Name>
-      <Area unit="SquareMeters">${(length * height).toFixed(2)}</Area>
-      <Azimuth>${azimuth.toFixed(0)}</Azimuth>
-      <Tilt>90</Tilt>
-      <CADObjectID>Wall_${i}</CADObjectID>
-      <Vertices>
-        <Vertex>
-          <Coordinates x="${p1x.toFixed(3)}" y="${p1y.toFixed(3)}" z="${p1z.toFixed(3)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${p2x.toFixed(3)}" y="${p2y.toFixed(3)}" z="${p2z.toFixed(3)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${p3x.toFixed(3)}" y="${p3y.toFixed(3)}" z="${p3z.toFixed(3)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${p4x.toFixed(3)}" y="${p4y.toFixed(3)}" z="${p4z.toFixed(3)}"/>
-        </Vertex>
-      </Vertices>
-    </Surface>`;
-  });
-  
-  return xml;
-}
-
-function generateOpeningsXml() {
-  let xml = '';
-  
-  openings.forEach((opening, i) => {
-    const wallIdx = opening.wallIndex;
-    const wall = walls[wallIdx];
-    
-    if (!wall) {
-      console.warn(`Opening ${i} references non-existent wall ${wallIdx}`);
-      return;
-    }
-    
-    const start = wall.worldStart;
-    const end = wall.worldEnd;
-    const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
-    
-    // Convert to meters
-    const x1 = start.x / 1000;
-    const y1 = (TOTAL_Y - start.y) / 1000;
-    const x2 = end.x / 1000;
-    const y2 = (TOTAL_Y - end.y) / 1000;
-    
-    // Position along wall
-    const ratio = Math.max(0.15, Math.min(0.85, opening.position));
-    const px = x1 + (x2 - x1) * ratio;
-    const py = y1 + (y2 - y1) * ratio;
-    
-    const width = opening.width; // Already in meters (0.85)
-    const openingHeight = opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M;
-    const openingBase = opening.type === 'door' ? 0 : WINDOW_START_HEIGHT_M;
-    const openingCenterZ = openingBase + openingHeight / 2;
-    
-    const surfaceId = `surface_${wallIdx}`;
-    const openingType = opening.type === 'window' ? 'Window' : 'Door';
-    const materialId = opening.type === 'window' ? 'glazing_double' : 'door_solid';
-    
-    xml += `
-    <Opening id="opening_${i}" openingType="${openingType}" attachedSurfaceId="${surfaceId}">
-      <Name>${openingType}_${i}</Name>
-      <Area unit="SquareMeters">${(width * openingHeight).toFixed(2)}</Area>
-      <Height>${openingHeight.toFixed(2)}</Height>
-      <Width>${width.toFixed(2)}</Width>
-      <DistanceFromFloor>${openingBase.toFixed(2)}</DistanceFromFloor>
-      <DistanceFromEdge>${ratio.toFixed(2)}</DistanceFromEdge>
-      <FractionOfAreaInSurface>${(width * openingHeight / (getWallLength(wall) * WALL_HEIGHT_M)).toFixed(3)}</FractionOfAreaInSurface>
-      <FrameAndDivider>
-        <FrameType>Unknown</FrameType>
-      </FrameAndDivider>
-      <GlassLayers>
-        ${opening.type === 'window' ? '<GlassLayer>Double</GlassLayer>' : ''}
-      </GlassLayers>
-      <UValue>${opening.type === 'window' ? 1.2 : 2.0}</UValue>
-      <SHGC>${opening.type === 'window' ? 0.62 : 0}</SHGC>
-      <VisibleTransmittance>${opening.type === 'window' ? 0.7 : 0}</VisibleTransmittance>
-      <CADMaterialId>${materialId}</CADMaterialId>
-      <Vertices>
-        <Vertex>
-          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${openingBase.toFixed(2)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${(openingBase + openingHeight).toFixed(2)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${(openingBase + openingHeight).toFixed(2)}"/>
-        </Vertex>
-        <Vertex>
-          <Coordinates x="${px.toFixed(3)}" y="${py.toFixed(3)}" z="${openingBase.toFixed(2)}"/>
-        </Vertex>
-      </Vertices>
-    </Opening>`;
-  });
-  
-  return xml;
-}
-
-function getWallLength(wall) {
-  const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
-  const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
-  return Math.hypot(dx, dy) / 1000;
-}
-
 function exportAsJSON() {
   const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
   
@@ -1170,8 +798,11 @@ function setupEventListeners() {
     }
   };
   
+  document.getElementById('zoomIn').onclick = zoomIn;
+  document.getElementById('zoomOut').onclick = zoomOut;
+  document.getElementById('resetZoom').onclick = resetZoom;
+  
   document.getElementById('exportDesign').onclick = () => exportAsJSON();
-  document.getElementById('exportGbxML').onclick = () => exportAsGbXML();
   
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
