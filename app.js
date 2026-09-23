@@ -1,17 +1,17 @@
 // Segal House Designer - Energy Modeling Edition
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
-const GRID_PIXEL_SIZE = 45;  // Changed from 90 to 45 (smaller visual cells)
-const CANVAS_COLS = 20;      // Changed from 12 to 20 (more columns)
-const CANVAS_ROWS = 15;      // Changed from 10 to 15 (more rows)
-const WALL_HEIGHT_M = 3.0;   // 3 meters
+const GRID_PIXEL_SIZE = 45;  // Smaller visual cells
+const CANVAS_COLS = 20;      // More columns
+const CANVAS_ROWS = 15;      // More rows
+const WALL_HEIGHT_M = 3.0;
 const WINDOW_START_HEIGHT_M = 0.8;
 const WINDOW_HEIGHT_M = 1.2;
 const DOOR_HEIGHT_M = 2.1;
 const MAX_OPENING_WIDTH = 0.85;
 
-const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
-const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
+const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;  // 900px
+const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE; // 675px
 
 // State
 let currentMode = 'exterior';
@@ -21,7 +21,7 @@ let openings = [];
 let gridPoints = [];
 let showGrid = true;
 let pendingOpening = null;
-let canvasScale = 1.0;  // Zoom level (1.0 = 100%)
+let canvasScale = 1.0;
 
 // Fabric canvas
 const fabricCanvas = new fabric.Canvas('gridCanvas', {
@@ -29,7 +29,8 @@ const fabricCanvas = new fabric.Canvas('gridCanvas', {
   height: CANVAS_HEIGHT,
   backgroundColor: '#fafafa',
   selection: false,
-  allowTouchScrolling: false
+  allowTouchScrolling: false,
+  preserveObjectStacking: false
 });
 
 // Three.js
@@ -38,7 +39,7 @@ let walls3DGroup, openings3DGroup, gridPoints3DGroup, floorGroup, roofGroup;
 let autoRotate = true;
 let rotationAngle = 0;
 
-console.log('🚀 Initializing Segal House Designer (Energy Mode)...');
+console.log('🚀 Initializing Segal House Designer...');
 
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) return null;
@@ -57,12 +58,14 @@ function getLinePoints(wall) {
 }
 
 function initAll() {
-  initThree();
+  setTimeout(() => {
+    initThree();
+  }, 100);
   initGridPoints();
   drawGridLines();
   setupEventListeners();
   updateStats();
-  renderThreeScene();
+  setTimeout(renderThreeScene, 200);
   drawOpeningMarkers();
   loadDesignFromURL();
   console.log('✅ Initialization complete!');
@@ -70,12 +73,10 @@ function initAll() {
 
 initAll();
 
-// ========== ZOOM FUNCTIONS ==========
+// ========== ZOOM FUNCTIONS (FIXED) ==========
 function setZoom(scale) {
   canvasScale = Math.max(0.25, Math.min(2.0, scale));
   fabricCanvas.setZoom(canvasScale);
-  fabricCanvas.setWidth(CANVAS_WIDTH * canvasScale);
-  fabricCanvas.setHeight(CANVAS_HEIGHT * canvasScale);
   fabricCanvas.setViewportTransform([canvasScale, 0, 0, canvasScale, 0, 0]);
   document.getElementById('zoomLevel').textContent = Math.round(canvasScale * 100) + '%';
   fabricCanvas.requestRenderAll();
@@ -104,73 +105,87 @@ function initThree() {
   const width = container.clientWidth || 400;
   const height = container.clientHeight || 300;
   
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xe8e8e8);
-  
-  camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-  camera.position.set(15, 15, 15);
-  camera.lookAt(0, 1.5, 0);
-  
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(width, height);
-  renderer.shadowMap.enabled = true;
-  container.appendChild(renderer.domElement);
-  
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dirLight = new THREE.DirLight(0xffffff, 0.8);
-  dirLight.position.set(10, 20, 10);
-  dirLight.castShadow = true;
-  scene.add(dirLight);
-  
-  walls3DGroup = new THREE.Group();
-  openings3DGroup = new THREE.Group();
-  gridPoints3DGroup = new THREE.Group();
-  floorGroup = new THREE.Group();
-  roofGroup = new THREE.Group();
-  
-  scene.add(walls3DGroup);
-  scene.add(openings3DGroup);
-  scene.add(gridPoints3DGroup);
-  scene.add(floorGroup);
-  scene.add(roofGroup);
-  
-  let isDragging = false, prevMouse = { x: 0, y: 0 };
-  const canvas3D = renderer.domElement;
-  
-  canvas3D.addEventListener('mousedown', () => isDragging = true);
-  canvas3D.addEventListener('mouseup', () => isDragging = false);
-  canvas3D.addEventListener('mouseleave', () => isDragging = false);
-  canvas3D.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-      rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
-      camera.position.x = Math.sin(rotationAngle) * 15;
-      camera.position.z = Math.cos(rotationAngle) * 15;
-      camera.lookAt(0, 1.5, 0);
-    }
-    prevMouse = { x: e.offsetX, y: e.offsetY };
-  });
-  
-  canvas3D.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    camera.position.multiplyScalar(1 + e.deltaY * 0.01);
-  });
-  
-  window.addEventListener('resize', () => {
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
-    renderThreeScene();
-  });
+  try {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xe8e8e8);
+    
+    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.set(15, 15, 15);
+    camera.lookAt(0, 1.5, 0);
+    
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    renderer.shadowMap.enabled = true;
+    renderer.setClearColor(0xe8e8e8);
+    
+    container.innerHTML = ''; // Clear any existing content
+    container.appendChild(renderer.domElement);
+    
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+    
+    walls3DGroup = new THREE.Group();
+    openings3DGroup = new THREE.Group();
+    gridPoints3DGroup = new THREE.Group();
+    floorGroup = new THREE.Group();
+    roofGroup = new THREE.Group();
+    
+    scene.add(walls3DGroup);
+    scene.add(openings3DGroup);
+    scene.add(gridPoints3DGroup);
+    scene.add(floorGroup);
+    scene.add(roofGroup);
+    
+    let isDragging = false, prevMouse = { x: 0, y: 0 };
+    const canvas3D = renderer.domElement;
+    
+    canvas3D.addEventListener('mousedown', () => isDragging = true);
+    canvas3D.addEventListener('mouseup', () => isDragging = false);
+    canvas3D.addEventListener('mouseleave', () => isDragging = false);
+    canvas3D.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
+        camera.position.x = Math.sin(rotationAngle) * 15;
+        camera.position.z = Math.cos(rotationAngle) * 15;
+        camera.lookAt(0, 1.5, 0);
+      }
+      prevMouse = { x: e.offsetX, y: e.offsetY };
+    });
+    
+    canvas3D.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      camera.position.multiplyScalar(1 + e.deltaY * 0.01);
+    });
+    
+    window.addEventListener('resize', () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderThreeScene();
+    });
+    
+    console.log('✅ Three.js initialized');
+  } catch (err) {
+    console.error('❌ Three.js initialization failed:', err);
+  }
 }
 
 function renderThreeScene() {
-  while(walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
-  while(openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
-  while(gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
-  while(floorGroup.children.length) floorGroup.remove(floorGroup.children[0]);
-  while(roofGroup.children.length) roofGroup.remove(roofGroup.children[0]);
+  if (!scene) {
+    console.warn('⚠️ Scene not initialized yet');
+    return;
+  }
+  
+  while(walls3DGroup && walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
+  while(openings3DGroup && openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
+  while(gridPoints3DGroup && gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
+  while(floorGroup && floorGroup.children.length) floorGroup.remove(floorGroup.children[0]);
+  while(roofGroup && roofGroup.children.length) roofGroup.remove(roofGroup.children[0]);
   
   const cx = (CANVAS_COLS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
   const cz = (CANVAS_ROWS * GRID_PIXEL_SIZE) / 2 / PIXEL_PER_MM / 1000;
@@ -182,7 +197,7 @@ function renderThreeScene() {
     };
   }
   
-  // Grid points
+  // Grid points 3D
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
@@ -192,7 +207,7 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls
+  // Walls 3D
   walls.forEach((wall, wallIdx) => {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -218,7 +233,7 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings
+    // Openings 3D
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -260,7 +275,7 @@ function renderThreeScene() {
     });
   });
   
-  // FLOOR - Create from wall bounds
+  // FLOOR
   if (walls.length > 0) {
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
@@ -287,7 +302,7 @@ function renderThreeScene() {
     }
   }
   
-  // ROOF - Same as floor but at ceiling height
+  // ROOF
   if (walls.length > 0) {
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
@@ -324,11 +339,16 @@ function animate() {
     camera.position.z = Math.cos(rotationAngle) * 15;
     camera.lookAt(0, 1.5, 0);
   }
-  renderer.render(scene, camera);
+  if (renderer && scene && camera) {
+    renderer.render(scene, camera);
+  }
 }
 
 // ========== FABRIC FUNCTIONS ==========
 function initGridPoints() {
+  // Clear existing points first
+  gridPoints = [];
+  
   for (let c = 0; c <= CANVAS_COLS; c++) {
     for (let r = 0; r <= CANVAS_ROWS; r++) {
       const point = new fabric.Circle({
@@ -336,12 +356,15 @@ function initGridPoints() {
         top: r * GRID_PIXEL_SIZE,
         radius: 5,
         fill: '#28a745',
+        stroke: '#1e7e34',
+        strokeWidth: 1,
         originX: 'center',
         originY: 'center',
         selectable: false,
         evented: false,
         hasControls: false,
-        hasBorders: false
+        hasBorders: false,
+        opacity: 1
       });
       point.gridData = { col: c, row: r };
       point.worldPos = { x: c * MODULE_SIZE, y: r * MODULE_SIZE };
@@ -349,6 +372,14 @@ function initGridPoints() {
       fabricCanvas.add(point);
     }
   }
+  
+  // Send grid points to back
+  gridPoints.forEach(point => {
+    fabricCanvas.sendToBack(point);
+  });
+  
+  fabricCanvas.requestRenderAll();
+  console.log(`✅ Created ${gridPoints.length} grid points`);
 }
 
 function drawGridLines() {
@@ -397,6 +428,8 @@ function drawGridLines() {
     
     ctx.fillText(`${len.toFixed(1)}m`, midX, midY);
   });
+  
+  fabricCanvas.requestRenderAll();
 }
 
 function getClosestGridPoint(x, y, tol = 20) {
@@ -404,7 +437,6 @@ function getClosestGridPoint(x, y, tol = 20) {
 }
 
 function createWall(pointA, pointB) {
-  // ENFORCE AXIS-ALIGNED ONLY (horizontal or vertical)
   if (pointA.gridData.col !== pointB.gridData.col && pointA.gridData.row !== pointB.gridData.row) {
     console.warn('⚠️ Diagonal walls not allowed. Creating axis-aligned wall instead.');
     const dx = Math.abs(pointB.gridData.col - pointA.gridData.col);
@@ -462,7 +494,7 @@ function createWall(pointA, pointB) {
   drawGridLines();
   
   updateStats();
-  renderThreeScene();
+  setTimeout(renderThreeScene, 50);
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -566,7 +598,7 @@ function createOpening(type) {
   closeOpeningDialog();
   drawOpeningMarkers();
   updateStats();
-  renderThreeScene();
+  setTimeout(renderThreeScene, 50);
 }
 
 // ========== MOUSE EVENTS ==========
@@ -592,7 +624,7 @@ fabricCanvas.on('mouse:down', (opt) => {
       drawOpeningMarkers();
       drawGridLines();
       updateStats();
-      renderThreeScene();
+      setTimeout(renderThreeScene, 50);
     }
     return;
   }
@@ -728,7 +760,7 @@ function loadDesign(data) {
   drawOpeningMarkers();
   drawGridLines();
   updateStats();
-  renderThreeScene();
+  setTimeout(renderThreeScene, 50);
 }
 
 function exportAsJSON() {
@@ -780,6 +812,19 @@ function setupEventListeners() {
   
   document.getElementById('toggle3D').onclick = () => {
     document.getElementById('three-sidebar').classList.toggle('hidden');
+    setTimeout(() => {
+      if (renderer) {
+        const container = document.getElementById('three-canvas');
+        if (container) {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
+          if (camera) camera.aspect = w / h;
+          if (camera) camera.updateProjectionMatrix();
+          if (renderer) renderer.setSize(w, h);
+          if (scene) animate();
+        }
+      }
+    }, 100);
   };
   
   document.getElementById('autoRotate').onchange = (e) => autoRotate = e.target.checked;
@@ -794,7 +839,7 @@ function setupEventListeners() {
       drawOpeningMarkers();
       drawGridLines();
       updateStats();
-      renderThreeScene();
+      setTimeout(renderThreeScene, 50);
     }
   };
   
