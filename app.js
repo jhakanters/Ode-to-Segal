@@ -41,6 +41,13 @@ let rotationAngle = 0;
 
 console.log('🚀 Initializing Segal House Designer...');
 
+// ========== JSONBIN.IO CONFIG ==========
+const JSONBIN_CONFIG = {
+  // 🔒 REPLACE THIS WITH YOUR NEW KEY AFTER ROTATING!
+  MASTER_KEY: '$2a$10$REPLACE_WITH_NEW_KEY_AFTER_ROTATION',
+  BASE_URL: 'https://api.jsonbin.io/v3/b'
+};
+
 function getLinePoints(wall) {
   if (!wall || !wall.fabricObj) return null;
   const line = wall.fabricObj;
@@ -92,6 +99,142 @@ function zoomOut() {
 
 function resetZoom() {
   setZoom(1.0);
+}
+
+// ========== JSONBIN.IO CLOUD FUNCTIONS ==========
+
+/**
+ * Upload current design to JSONBin.io
+ * Returns the Bin ID for use in Grasshopper
+ */
+async function uploadDesignToJSONBin(designName = null) {
+  const data = exportAsJSON();
+  
+  const payload = {
+    name: designName || `segal-design-${Date.now()}`,
+    version: '2.0',
+    unit: 'mm',
+    walls: data.walls,
+    openings: data.openings,
+    metadata: {
+      timestamp: Date.now(),
+      exteriorLength: parseFloat(document.getElementById('exteriorLength').textContent),
+      interiorLength: parseFloat(document.getElementById('interiorLength').textContent),
+      openingCount: parseInt(document.getElementById('openingCount').textContent),
+      energyScore: parseInt(document.getElementById('energyScore').textContent),
+      heatLoss: parseFloat(document.getElementById('heatLoss').textContent)
+    }
+  };
+  
+  try {
+    const response = await fetch(JSONBIN_CONFIG.BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    const binId = result.record._id;
+    
+    console.log('✅ Design uploaded successfully!');
+    console.log('📋 Bin ID:', binId);
+    console.log('🔗 View URL:', `https://jsonbin.io/bin/${binId}`);
+    
+    alert(`✓ Design saved to cloud!\n\nBin ID: ${binId}\n\nCopy this ID to load in Grasshopper!\nView: https://jsonbin.io/bin/${binId}`);
+    
+    return binId;
+    
+  } catch (error) {
+    console.error('❌ Upload failed:', error);
+    alert(`Upload failed: ${error.message}\n\nCheck console for details.`);
+    return null;
+  }
+}
+
+/**
+ * Load design from JSONBin.io by Bin ID
+ */
+async function loadDesignFromJSONBin(binId = null) {
+  if (!binId) {
+    binId = prompt('Enter JSONBin.io Bin ID:\n(Found after clicking "Save to Cloud" in Segal app)');
+    if (!binId || binId.trim() === '') return false;
+  }
+  
+  try {
+    const response = await fetch(`${JSONBIN_CONFIG.BASE_URL}/${binId.trim()}/latest`, {
+      method: 'GET',
+      headers: {
+        'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    const data = result.record;
+    
+    // Clear existing design
+    walls.forEach(w => fabricCanvas.remove(w.fabricObj));
+    walls = [];
+    openings = [];
+    selectedPoint = null;
+    highlightSelected(null);
+    
+    // Load walls
+    if (data.walls) {
+      data.walls.forEach((wallData) => {
+        const pointA = gridPoints[wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col];
+        const pointB = gridPoints[wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col];
+        
+        if (pointA && pointB) {
+          const oldMode = currentMode;
+          currentMode = wallData.mode;
+          createWall(pointA, pointB);
+          currentMode = oldMode;
+          if (walls.length > 0 && typeof wallData.uValue === 'number') {
+            walls[walls.length - 1].uValue = wallData.uValue;
+          }
+        }
+      });
+    }
+    
+    // Load openings
+    if (data.openings) {
+      data.openings.forEach(o => {
+        openings.push({
+          ...o,
+          width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH)
+        });
+      });
+    }
+    
+    drawOpeningMarkers();
+    drawGridLines();
+    updateStats();
+    setTimeout(renderThreeScene, 50);
+    
+    const extLen = document.getElementById('exteriorLength').textContent;
+    const energyScore = document.getElementById('energyScore').textContent);
+    
+    console.log('✅ Design loaded successfully!');
+    alert(`✓ Design loaded from cloud!\n\nExterior Walls: ${extLen}\nEnergy Score: ${energyScore}`);
+    
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Load failed:', error);
+    alert(`Load failed: ${error.message}\n\nVerify Bin ID is correct and public.`);
+    return false;
+  }
 }
 
 // ========== THREE.JS ==========
@@ -772,17 +915,18 @@ function exportAsJSON() {
     walls: walls.map(w => ({
       mode: w.mode,
       uValue: w.uValue,
-      start: { x: w.worldStart.x, y: TOTAL_Y - w.worldStart.y },
-      end: { x: w.worldEnd.x, y: TOTAL_Y - w.worldEnd.y }
+      pointA: w.pointA,
+      pointB: w.pointB,
+      worldStart: w.worldStart,
+      worldEnd: w.worldEnd
     })),
     openings: openings.map(o => {
       const wall = walls[o.wallIndex];
       return {
         type: o.type,
         width: o.width * 1000,
-        positionRatio: o.position,
-        wallStart: { x: wall.worldStart.x, y: TOTAL_Y - wall.worldStart.y },
-        wallEnd: { x: wall.worldEnd.x, y: TOTAL_Y - wall.worldEnd.y }
+        position: o.position,
+        wallIndex: o.wallIndex
       };
     }),
     timestamp: Date.now()
@@ -793,6 +937,8 @@ function exportAsJSON() {
   a.href = URL.createObjectURL(blob);
   a.download = `segal-${Date.now()}.json`;
   a.click();
+  
+  return data;
 }
 
 // ========== EVENT LISTENERS ==========
@@ -848,6 +994,17 @@ function setupEventListeners() {
   document.getElementById('resetZoom').onclick = resetZoom;
   
   document.getElementById('exportDesign').onclick = () => exportAsJSON();
+  
+  // CLOUD SAVE BUTTON
+  document.getElementById('cloudSave').onclick = async () => {
+    const name = prompt('Enter design name (optional, leave blank for auto-generated):');
+    await uploadDesignToJSONBin(name || null);
+  };
+  
+  // CLOUD LOAD BUTTON
+  document.getElementById('cloudLoad').onclick = () => {
+    loadDesignFromJSONBin();
+  };
   
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
