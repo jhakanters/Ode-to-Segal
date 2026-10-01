@@ -52,7 +52,7 @@ console.log('🚀 Initializing Segal House Designer...');
 // ========== JSONBIN.IO CONFIG ==========
 // ⚠️ IMPORTANT: Replace this with your NEW key after rotating!
 const JSONBIN_CONFIG = {
-  MASTER_KEY: '$2a$10$REPLACE_WITH_NEW_KEY_AFTER_ROTATION',
+  MASTER_KEY: '$2a$10$jYWa5qhy9Xc.hEaY3n2PD.0uGcvBOAjvI0QCv1vTlLWfLKrnE13sO',
   BASE_URL: 'https://api.jsonbin.io/v3/b'
 };
 
