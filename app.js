@@ -228,8 +228,8 @@ async function loadDesignFromJSONBin(binId = null) {
     updateStats();
     setTimeout(renderThreeScene, 100);
     
-    const extLen = document.getElementById('exteriorLength').textContent || '0.0 m';
-    const energyScore = document.getElementById('energyScore').textContent || '100';
+const extLen = document.getElementById('exteriorLength').textContent || '0.0 m';
+const energyScore = document.getElementById('energyScore').textContent || '100';  
     
     console.log('✅ Design loaded successfully!');
     alert(`✓ Design loaded from cloud!\n\nExterior Walls: ${extLen}\nEnergy Score: ${energyScore}`);
