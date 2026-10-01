@@ -134,7 +134,7 @@ async function uploadDesignToJSONBin(designName = null) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Master-Key': $2a$10$jYWa5qhy9Xc.hEaY3n2PD.0uGcvBOAjvI0QCv1vTlLWfLKrnE13sO
+        'X-Master-Key': $2a$10$jYWa5qhy9Xc.hEaY3n2PD.0uGcvBOAjvI0QCv1vTlLWfLKrnE13sO,
       },
       body: JSON.stringify(payload)
     });
