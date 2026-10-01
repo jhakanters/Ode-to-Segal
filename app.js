@@ -1,6 +1,6 @@
 // ============================================
 // Segal House Designer - Energy Modeling Edition
-// FIXED VERSION with Cloud Save/Load
+// FINAL FIXED VERSION with JSONBin Integration
 // ============================================
 
 const MODULE_SIZE = 900;
@@ -45,7 +45,7 @@ let rotationAngle = 0;
 console.log('🚀 Initializing Segal House Designer...');
 
 // ========== JSONBIN.IO CONFIG ==========
-// ⚠️ REPLACE WITH YOUR NEW KEY AFTER ROTATING THE COMPROMISED ONE!
+// ⚠️ REPLACE WITH YOUR ACTUAL KEY FROM JSONBIN DASHBOARD
 const JSONBIN_CONFIG = {
   MASTER_KEY: "$2a$10$jo.i4BMv/ws1EDkIE3ppeuSfOThPyIARpCkpwA/CRPjCOQLa9hIQC",
   BASE_URL: "https://api.jsonbin.io/v3/b"
@@ -81,6 +81,7 @@ function initAll() {
   initGridPoints();
   drawGridLines();
   setupEventListeners();
+  attachMouseHandlers();  // Add mouse handlers separately
   updateStats();
   drawOpeningMarkers();
   loadDesignFromURL();
@@ -144,6 +145,7 @@ async function uploadDesignToJSONBin(designName) {
   };
   
   try {
+    console.log('📤 Sending upload request to JSONBin...');
     const response = await fetch(JSONBIN_CONFIG.BASE_URL, {
       method: 'POST',
       headers: {
@@ -158,7 +160,26 @@ async function uploadDesignToJSONBin(designName) {
     }
     
     const result = await response.json();
-    const binId = result.record._id;
+    console.log('📥 Raw API response:', result);
+    
+    // FIX: New JSONBin API puts _id in result.metadata.id
+    let binId = null;
+    if (result.metadata && result.metadata.id) {
+      binId = result.metadata.id;
+      console.log('✅ Found Bin ID in result.metadata.id');
+    } else if (result.record && result.record._id) {
+      binId = result.record._id;
+      console.log('✅ Found Bin ID in result.record._id (old API)');
+    } else if (result._id) {
+      binId = result._id;
+      console.log('✅ Found Bin ID in result._id (alternative format)');
+    }
+    
+    if (!binId) {
+      console.error('❌ Could not find Bin ID in response!');
+      console.error('Full response:', result);
+      throw new Error('Invalid response format - no id found');
+    }
     
     console.log('✅ Design uploaded successfully!');
     console.log('📋 Bin ID:', binId);
@@ -185,6 +206,7 @@ async function loadDesignFromJSONBin(binId) {
   
   try {
     const url = JSONBIN_CONFIG.BASE_URL + '/' + binId.trim() + '/latest';
+    console.log('📥 Loading from URL:', url);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -197,7 +219,8 @@ async function loadDesignFromJSONBin(binId) {
     }
     
     const result = await response.json();
-    const data = result.record;
+    console.log('📥 Loaded response:', result);
+    const data = result.record || result;  // Handle different response formats
     
     // Clear existing design
     if (walls.length > 0) {
@@ -212,6 +235,7 @@ async function loadDesignFromJSONBin(binId) {
     
     // Load walls
     if (data.walls && Array.isArray(data.walls)) {
+      console.log('🧱 Loading', data.walls.length, 'walls');
       data.walls.forEach(function(wallData) {
         const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
         const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
@@ -234,6 +258,7 @@ async function loadDesignFromJSONBin(binId) {
     
     // Load openings
     if (data.openings && Array.isArray(data.openings)) {
+      console.log('🪟 Loading', data.openings.length, 'openings');
       data.openings.forEach(function(o) {
         openings.push({
           type: o.type,
@@ -616,8 +641,26 @@ function getClosestGridPoint(x, y, tol) {
 }
 
 function createWall(pointA, pointB) {
+  console.log('🧱 createWall called');
+  console.log('  Point A:', pointA ? 'found' : 'MISSING');
+  console.log('  Point B:', pointB ? 'found' : 'MISSING');
+  console.log('  Mode:', currentMode);
+  console.log('  fabricCanvas:', fabricCanvas ? 'OK' : 'NULL');
+  
+  if (!pointA || !pointB) {
+    console.error('❌ Invalid points passed to createWall');
+    return;
+  }
+  
+  if (!fabricCanvas) {
+    console.error('❌ fabricCanvas is null! Cannot create wall.');
+    alert('Error: Canvas not initialized. Reload the page.');
+    return;
+  }
+  
   // Force axis-aligned walls
   if (pointA.gridData.col !== pointB.gridData.col && pointA.gridData.row !== pointB.gridData.row) {
+    console.log('⚠️ Diagonal wall detected, converting to axis-aligned');
     const dx = Math.abs(pointB.gridData.col - pointA.gridData.col);
     const dy = Math.abs(pointB.gridData.row - pointA.gridData.row);
     
@@ -633,6 +676,11 @@ function createWall(pointA, pointB) {
       pointB.top = pointB.gridData.row * GRID_PIXEL_SIZE;
     }
   }
+  
+  const uValueInput = document.getElementById('insulationLevel');
+  const uValue = uValueInput ? parseFloat(uValueInput.value || 0.35) : 0.35;
+  
+  console.log('  U-value:', uValue);
   
   const line = new fabric.Line([
     pointA.left, pointA.top,
@@ -660,8 +708,10 @@ function createWall(pointA, pointB) {
     pointB: pointB.gridData,
     worldStart: pointA.worldPos,
     worldEnd: pointB.worldPos,
-    uValue: parseFloat(document.getElementById('insulationLevel').value || 0.35)
+    uValue: uValue
   };
+  
+  console.log('  Created wall object:', wallData);
   
   walls.push(wallData);
   fabricCanvas.add(line);
@@ -673,6 +723,8 @@ function createWall(pointA, pointB) {
   drawGridLines();
   updateStats();
   setTimeout(renderThreeScene, 50);
+  
+  console.log('✅ Wall created! Total walls:', walls.length);
 }
 
 function getLinePoints(wall) {
@@ -765,6 +817,107 @@ function drawOpeningMarkers() {
   fabricCanvas.requestRenderAll();
 }
 
+// ========== MOUSE EVENT HANDLERS ==========
+function attachMouseHandlers() {
+  if (!fabricCanvas) {
+    console.error('❌ attachMouseHandlers: fabricCanvas is NULL');
+    return;
+  }
+  
+  console.log('✅ Attaching mouse handlers to canvas');
+  
+  fabricCanvas.on('mouse:down', function(opt) {
+    console.log('🖱️ Mouse click detected!');
+    console.log('  Coordinates:', opt.e.clientX, opt.e.clientY);
+    
+    if (!fabricCanvas) {
+      console.error('❌ Canvas became null during event!');
+      return;
+    }
+    
+    const pointer = fabricCanvas.getPointer(opt.e);
+    const mx = pointer.x;
+    const my = pointer.y;
+    
+    console.log('  Canvas coordinates:', mx.toFixed(1), ',', my.toFixed(1));
+    console.log('  Current mode:', currentMode);
+    console.log('  Selected point before:', selectedPoint ? 'YES' : 'NO');
+    
+    if (currentMode === 'delete') {
+      console.log('🗑️ Delete mode');
+      const result = findWallUnderMouse(mx, my, 15);
+      if (result) {
+        console.log('✅ Deleting wall at index:', result.wallIndex);
+        const wallIdx = result.wallIndex;
+        const wall = walls[wallIdx];
+        fabricCanvas.remove(wall.fabricObj);
+        
+        openings = openings.filter(function(o) {
+          return o.wallIndex !== wallIdx;
+        });
+        openings = openings.map(function(o) {
+          return {
+            ...o,
+            wallIndex: o.wallIndex > wallIdx ? o.wallIndex - 1 : o.wallIndex
+          };
+        });
+        
+        walls.splice(wallIdx, 1);
+        
+        drawOpeningMarkers();
+        drawGridLines();
+        updateStats();
+        setTimeout(renderThreeScene, 50);
+      }
+      return;
+    }
+    
+    if (currentMode === 'opening') {
+      console.log('🪟 Opening mode');
+      const result = findWallUnderMouse(mx, my, 15);
+      if (result) {
+        console.log('✅ Adding opening to wall:', result.wallIndex);
+        openOpeningDialog(result);
+      }
+      return;
+    }
+    
+    // Wall creation (exterior/interior)
+    console.log('🧱 Wall creation mode');
+    const clickedPoint = getClosestGridPoint(mx, my);
+    
+    if (!clickedPoint) {
+      console.log('❌ No grid point found');
+      return;
+    }
+    
+    console.log('✅ Grid point found at col:', clickedPoint.gridData.col, 'row:', clickedPoint.gridData.row);
+    
+    if (!selectedPoint) {
+      console.log('✅ FIRST POINT SELECTED');
+      selectedPoint = clickedPoint;
+      highlightSelected(clickedPoint);
+    } else if (selectedPoint === clickedPoint) {
+      console.log('ℹ️ Same point clicked, deselecting');
+      selectedPoint = null;
+      highlightSelected(null);
+    } else {
+      console.log('✅ SECOND POINT SELECTED - CREATING WALL');
+      createWall(selectedPoint, clickedPoint);
+    }
+  });
+  
+  fabricCanvas.on('mouse:move', function(opt) {
+    if (currentMode === 'opening') {
+      const pointer = fabricCanvas.getPointer(opt.e);
+      const result = findWallUnderMouse(pointer.x, pointer.y, 15);
+      fabricCanvas.defaultCursor = result ? 'pointer' : 'crosshair';
+    }
+  });
+  
+  console.log('✅ Mouse handlers attached successfully');
+}
+
 // ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
   pendingOpening = wallResult;
@@ -803,72 +956,6 @@ function createOpening(type) {
   drawOpeningMarkers();
   updateStats();
   setTimeout(renderThreeScene, 50);
-}
-
-// ========== MOUSE EVENTS ==========
-if (fabricCanvas) {
-  fabricCanvas.on('mouse:down', function(opt) {
-    const pointer = fabricCanvas.getPointer(opt.e);
-    const mx = pointer.x;
-    const my = pointer.y;
-    
-    if (currentMode === 'delete') {
-      const result = findWallUnderMouse(mx, my, 15);
-      if (result) {
-        const wallIdx = result.wallIndex;
-        const wall = walls[wallIdx];
-        fabricCanvas.remove(wall.fabricObj);
-        
-        openings = openings.filter(function(o) {
-          return o.wallIndex !== wallIdx;
-        });
-        openings = openings.map(function(o) {
-          return {
-            ...o,
-            wallIndex: o.wallIndex > wallIdx ? o.wallIndex - 1 : o.wallIndex
-          };
-        });
-        
-        walls.splice(wallIdx, 1);
-        
-        drawOpeningMarkers();
-        drawGridLines();
-        updateStats();
-        setTimeout(renderThreeScene, 50);
-      }
-      return;
-    }
-    
-    if (currentMode === 'opening') {
-      const result = findWallUnderMouse(mx, my, 15);
-      if (result) {
-        openOpeningDialog(result);
-      }
-      return;
-    }
-    
-    const clickedPoint = getClosestGridPoint(mx, my);
-    
-    if (!clickedPoint) return;
-    
-    if (!selectedPoint) {
-      selectedPoint = clickedPoint;
-      highlightSelected(clickedPoint);
-    } else if (selectedPoint === clickedPoint) {
-      selectedPoint = null;
-      highlightSelected(null);
-    } else {
-      createWall(selectedPoint, clickedPoint);
-    }
-  });
-  
-  fabricCanvas.on('mouse:move', function(opt) {
-    if (currentMode === 'opening') {
-      const pointer = fabricCanvas.getPointer(opt.e);
-      const result = findWallUnderMouse(pointer.x, pointer.y, 15);
-      fabricCanvas.defaultCursor = result ? 'pointer' : 'crosshair';
-    }
-  });
 }
 
 function highlightSelected(point) {
@@ -957,31 +1044,35 @@ function loadDesign(data) {
   highlightSelected(null);
   
   // Load walls
-  data.walls.forEach(function(wallData) {
-    const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
-    const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
-    
-    const pointA = gridPoints[idxA];
-    const pointB = gridPoints[idxB];
-    
-    if (pointA && pointB) {
-      const oldMode = currentMode;
-      currentMode = wallData.mode;
-      createWall(pointA, pointB);
-      currentMode = oldMode;
-      if (walls.length > 0 && typeof wallData.uValue === 'number') {
-        walls[walls.length - 1].uValue = wallData.uValue;
+  if (data.walls && Array.isArray(data.walls)) {
+    data.walls.forEach(function(wallData) {
+      const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
+      const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
+      
+      const pointA = gridPoints[idxA];
+      const pointB = gridPoints[idxB];
+      
+      if (pointA && pointB) {
+        const oldMode = currentMode;
+        currentMode = wallData.mode;
+        createWall(pointA, pointB);
+        currentMode = oldMode;
+        if (walls.length > 0 && typeof wallData.uValue === 'number') {
+          walls[walls.length - 1].uValue = wallData.uValue;
+        }
       }
-    }
-  });
+    });
+  }
   
   // Load openings
-  data.openings.forEach(function(o) {
-    openings.push({
-      ...o,
-      width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH)
+  if (data.openings && Array.isArray(data.openings)) {
+    data.openings.forEach(function(o) {
+      openings.push({
+        ...o,
+        width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH)
+      });
     });
-  });
+  }
   
   drawOpeningMarkers();
   drawGridLines();
@@ -1111,13 +1202,23 @@ function setupEventListeners() {
 }
 
 function setMode(mode) {
+  console.log('🔧 setMode called with:', mode);
   currentMode = mode;
+  
   document.querySelectorAll('.mode-btn').forEach(function(b) {
     b.classList.remove('active');
   });
+  
   const btnId = 'mode' + mode.charAt(0).toUpperCase() + mode.slice(1);
   const btn = document.getElementById(btnId);
-  if (btn) btn.classList.add('active');
+  
+  if (btn) {
+    btn.classList.add('active');
+    console.log('✅ Button activated:', btnId);
+  } else {
+    console.error('❌ Button not found:', btnId);
+  }
+  
   selectedPoint = null;
   highlightSelected(null);
   updateStats();
