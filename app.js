@@ -1,17 +1,19 @@
 // Segal House Designer - Energy Modeling Edition
+// FIXED VERSION with Cloud Save/Load
+
 const MODULE_SIZE = 900;
 const PIXEL_PER_MM = 0.1;
-const GRID_PIXEL_SIZE = 45;  // Smaller visual cells
-const CANVAS_COLS = 20;      // More columns
-const CANVAS_ROWS = 15;      // More rows
+const GRID_PIXEL_SIZE = 45;
+const CANVAS_COLS = 20;
+const CANVAS_ROWS = 15;
 const WALL_HEIGHT_M = 3.0;
 const WINDOW_START_HEIGHT_M = 0.8;
 const WINDOW_HEIGHT_M = 1.2;
 const DOOR_HEIGHT_M = 2.1;
 const MAX_OPENING_WIDTH = 0.85;
 
-const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;  // 900px
-const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE; // 675px
+const CANVAS_WIDTH = CANVAS_COLS * GRID_PIXEL_SIZE;
+const CANVAS_HEIGHT = CANVAS_ROWS * GRID_PIXEL_SIZE;
 
 // State
 let currentMode = 'exterior';
@@ -23,15 +25,21 @@ let showGrid = true;
 let pendingOpening = null;
 let canvasScale = 1.0;
 
-// Fabric canvas
-const fabricCanvas = new fabric.Canvas('gridCanvas', {
-  width: CANVAS_WIDTH,
-  height: CANVAS_HEIGHT,
-  backgroundColor: '#fafafa',
-  selection: false,
-  allowTouchScrolling: false,
-  preserveObjectStacking: false
-});
+// Fabric canvas - with error handling
+let fabricCanvas;
+try {
+  fabricCanvas = new fabric.Canvas('gridCanvas', {
+    width: CANVAS_WIDTH,
+    height: CANVAS_HEIGHT,
+    backgroundColor: '#fafafa',
+    selection: false,
+    allowTouchScrolling: false,
+    preserveObjectStacking: false
+  });
+} catch (e) {
+  console.error('❌ Failed to initialize Fabric canvas:', e);
+  alert('Error: Fabric.js not loaded. Check internet connection and reload.');
+}
 
 // Three.js
 let scene, camera, renderer;
@@ -42,45 +50,44 @@ let rotationAngle = 0;
 console.log('🚀 Initializing Segal House Designer...');
 
 // ========== JSONBIN.IO CONFIG ==========
+// ⚠️ IMPORTANT: Replace this with your NEW key after rotating!
 const JSONBIN_CONFIG = {
-  // 🔒 REPLACE THIS WITH YOUR NEW KEY AFTER ROTATING!
-  MASTER_KEY: '$2a$10$jYWa5qhy9Xc.hEaY3n2PD.0uGcvBOAjvI0QCv1vTlLWfLKrnE13sO',
+  MASTER_KEY: '$2a$10$REPLACE_WITH_NEW_KEY_AFTER_ROTATION',
   BASE_URL: 'https://api.jsonbin.io/v3/b'
 };
 
-function getLinePoints(wall) {
-  if (!wall || !wall.fabricObj) return null;
-  const line = wall.fabricObj;
-  
-  if (line.x1 !== undefined && line.y1 !== undefined && 
-      line.x2 !== undefined && line.y2 !== undefined) {
-    return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
-  }
-  
-  if (Array.isArray(line.points) && line.points.length >= 4) {
-    return { x1: line.points[0], y1: line.points[1], x2: line.points[2], y2: line.points[3] };
-  }
-  
-  return null;
-}
-
+// ========== INITIALIZATION ==========
 function initAll() {
-  setTimeout(() => {
-    initThree();
-  }, 100);
+  // Verify canvas exists
+  if (!fabricCanvas) {
+    console.error('❌ Fabric canvas not initialized!');
+    return;
+  }
+  
   initGridPoints();
   drawGridLines();
   setupEventListeners();
   updateStats();
-  setTimeout(renderThreeScene, 200);
   drawOpeningMarkers();
   loadDesignFromURL();
-  console.log('✅ Initialization complete!');
+  
+  // Initialize Three.js separately
+  setTimeout(() => {
+    initThree();
+    setTimeout(renderThreeScene, 100);
+  }, 50);
+  
+  console.log('✅ Segal House Designer initialized!');
 }
 
-initAll();
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAll);
+} else {
+  initAll();
+}
 
-// ========== ZOOM FUNCTIONS (FIXED) ==========
+// ========== ZOOM FUNCTIONS ==========
 function setZoom(scale) {
   canvasScale = Math.max(0.25, Math.min(2.0, scale));
   fabricCanvas.setZoom(canvasScale);
@@ -101,12 +108,8 @@ function resetZoom() {
   setZoom(1.0);
 }
 
-// ========== JSONBIN.IO CLOUD FUNCTIONS ==========
+// ========== CLOUD SAVE/LOAD FUNCTIONS ==========
 
-/**
- * Upload current design to JSONBin.io
- * Returns the Bin ID for use in Grasshopper
- */
 async function uploadDesignToJSONBin(designName = null) {
   const data = exportAsJSON();
   
@@ -118,11 +121,11 @@ async function uploadDesignToJSONBin(designName = null) {
     openings: data.openings,
     metadata: {
       timestamp: Date.now(),
-      exteriorLength: parseFloat(document.getElementById('exteriorLength').textContent),
-      interiorLength: parseFloat(document.getElementById('interiorLength').textContent),
-      openingCount: parseInt(document.getElementById('openingCount').textContent),
-      energyScore: parseInt(document.getElementById('energyScore').textContent),
-      heatLoss: parseFloat(document.getElementById('heatLoss').textContent)
+      exteriorLength: parseFloat(document.getElementById('exteriorLength').textContent) || 0,
+      interiorLength: parseFloat(document.getElementById('interiorLength').textContent) || 0,
+      openingCount: parseInt(document.getElementById('openingCount').textContent) || 0,
+      energyScore: parseInt(document.getElementById('energyScore').textContent) || 100,
+      heatLoss: parseFloat(document.getElementById('heatLoss').textContent) || 0
     }
   };
   
@@ -158,9 +161,6 @@ async function uploadDesignToJSONBin(designName = null) {
   }
 }
 
-/**
- * Load design from JSONBin.io by Bin ID
- */
 async function loadDesignFromJSONBin(binId = null) {
   if (!binId) {
     binId = prompt('Enter JSONBin.io Bin ID:\n(Found after clicking "Save to Cloud" in Segal app)');
@@ -183,23 +183,29 @@ async function loadDesignFromJSONBin(binId = null) {
     const data = result.record;
     
     // Clear existing design
-    walls.forEach(w => fabricCanvas.remove(w.fabricObj));
+    if (walls.length > 0) {
+      walls.forEach(w => fabricCanvas.remove(w.fabricObj));
+    }
     walls = [];
     openings = [];
     selectedPoint = null;
     highlightSelected(null);
     
     // Load walls
-    if (data.walls) {
+    if (data.walls && Array.isArray(data.walls)) {
       data.walls.forEach((wallData) => {
-        const pointA = gridPoints[wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col];
-        const pointB = gridPoints[wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col];
+        const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
+        const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
+        
+        const pointA = gridPoints[idxA];
+        const pointB = gridPoints[idxB];
         
         if (pointA && pointB) {
           const oldMode = currentMode;
           currentMode = wallData.mode;
           createWall(pointA, pointB);
           currentMode = oldMode;
+          
           if (walls.length > 0 && typeof wallData.uValue === 'number') {
             walls[walls.length - 1].uValue = wallData.uValue;
           }
@@ -208,8 +214,8 @@ async function loadDesignFromJSONBin(binId = null) {
     }
     
     // Load openings
-    if (data.openings) {
-      data.openings.forEach(o => {
+    if (data.openings && Array.isArray(data.openings)) {
+      data.openings.forEach((o) => {
         openings.push({
           ...o,
           width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH)
@@ -220,10 +226,10 @@ async function loadDesignFromJSONBin(binId = null) {
     drawOpeningMarkers();
     drawGridLines();
     updateStats();
-    setTimeout(renderThreeScene, 50);
+    setTimeout(renderThreeScene, 100);
     
-    const extLen = document.getElementById('exteriorLength').textContent;
-    const energyScore = document.getElementById('energyScore').textContent);
+    const extLen = document.getElementById('exteriorLength').textContent || '0.0 m';
+    const energyScore = document.getElementById('energyScore').textContent || '100';
     
     console.log('✅ Design loaded successfully!');
     alert(`✓ Design loaded from cloud!\n\nExterior Walls: ${extLen}\nEnergy Score: ${energyScore}`);
@@ -232,7 +238,7 @@ async function loadDesignFromJSONBin(binId = null) {
     
   } catch (error) {
     console.error('❌ Load failed:', error);
-    alert(`Load failed: ${error.message}\n\nVerify Bin ID is correct and public.`);
+    alert(`Load failed: ${error.message}\n\nVerify Bin ID is correct.`);
     return false;
   }
 }
@@ -261,7 +267,7 @@ function initThree() {
     renderer.shadowMap.enabled = true;
     renderer.setClearColor(0xe8e8e8);
     
-    container.innerHTML = ''; // Clear any existing content
+    container.innerHTML = '';
     container.appendChild(renderer.domElement);
     
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -282,12 +288,14 @@ function initThree() {
     scene.add(floorGroup);
     scene.add(roofGroup);
     
-    let isDragging = false, prevMouse = { x: 0, y: 0 };
+    let isDragging = false;
+    let prevMouse = { x: 0, y: 0 };
     const canvas3D = renderer.domElement;
     
-    canvas3D.addEventListener('mousedown', () => isDragging = true);
-    canvas3D.addEventListener('mouseup', () => isDragging = false);
-    canvas3D.addEventListener('mouseleave', () => isDragging = false);
+    canvas3D.addEventListener('mousedown', () => { isDragging = true; });
+    canvas3D.addEventListener('mouseup', () => { isDragging = false; });
+    canvas3D.addEventListener('mouseleave', () => { isDragging = false; });
+    
     canvas3D.addEventListener('mousemove', (e) => {
       if (isDragging) {
         rotationAngle += (e.offsetX - prevMouse.x) * 0.01;
@@ -324,6 +332,7 @@ function renderThreeScene() {
     return;
   }
   
+  // Clear existing meshes
   while(walls3DGroup && walls3DGroup.children.length) walls3DGroup.remove(walls3DGroup.children[0]);
   while(openings3DGroup && openings3DGroup.children.length) openings3DGroup.remove(openings3DGroup.children[0]);
   while(gridPoints3DGroup && gridPoints3DGroup.children.length) gridPoints3DGroup.remove(gridPoints3DGroup.children[0]);
@@ -340,7 +349,7 @@ function renderThreeScene() {
     };
   }
   
-  // Grid points 3D
+  // Grid points
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
   const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
   gridPoints.forEach(p => {
@@ -350,7 +359,7 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls 3D
+  // Walls
   walls.forEach((wall, wallIdx) => {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -376,7 +385,7 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings 3D
+    // Openings on this wall
     openings.filter(o => o.wallIndex === wallIdx).forEach(opening => {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -418,7 +427,7 @@ function renderThreeScene() {
     });
   });
   
-  // FLOOR
+  // Floor (simple bounding box)
   if (walls.length > 0) {
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
@@ -445,7 +454,7 @@ function renderThreeScene() {
     }
   }
   
-  // ROOF
+  // Roof
   if (walls.length > 0) {
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
@@ -489,7 +498,6 @@ function animate() {
 
 // ========== FABRIC FUNCTIONS ==========
 function initGridPoints() {
-  // Clear existing points first
   gridPoints = [];
   
   for (let c = 0; c <= CANVAS_COLS; c++) {
@@ -516,11 +524,7 @@ function initGridPoints() {
     }
   }
   
-  // Send grid points to back
-  gridPoints.forEach(point => {
-    fabricCanvas.sendToBack(point);
-  });
-  
+  gridPoints.forEach(point => fabricCanvas.sendToBack(point));
   fabricCanvas.requestRenderAll();
   console.log(`✅ Created ${gridPoints.length} grid points`);
 }
@@ -534,11 +538,17 @@ function drawGridLines() {
   
   for (let c = 0; c <= CANVAS_COLS; c++) {
     const x = c * GRID_PIXEL_SIZE;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_HEIGHT); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, CANVAS_HEIGHT);
+    ctx.stroke();
   }
   for (let r = 0; r <= CANVAS_ROWS; r++) {
     const y = r * GRID_PIXEL_SIZE;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(CANVAS_WIDTH, y);
+    ctx.stroke();
   }
   
   ctx.font = 'bold 10px Arial';
@@ -580,8 +590,8 @@ function getClosestGridPoint(x, y, tol = 20) {
 }
 
 function createWall(pointA, pointB) {
+  // Force axis-aligned walls
   if (pointA.gridData.col !== pointB.gridData.col && pointA.gridData.row !== pointB.gridData.row) {
-    console.warn('⚠️ Diagonal walls not allowed. Creating axis-aligned wall instead.');
     const dx = Math.abs(pointB.gridData.col - pointA.gridData.col);
     const dy = Math.abs(pointB.gridData.row - pointA.gridData.row);
     
@@ -635,9 +645,24 @@ function createWall(pointA, pointB) {
   highlightSelected(null);
   drawOpeningMarkers();
   drawGridLines();
-  
   updateStats();
   setTimeout(renderThreeScene, 50);
+}
+
+function getLinePoints(wall) {
+  if (!wall || !wall.fabricObj) return null;
+  const line = wall.fabricObj;
+  
+  if (line.x1 !== undefined && line.y1 !== undefined && 
+      line.x2 !== undefined && line.y2 !== undefined) {
+    return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
+  }
+  
+  if (Array.isArray(line.points) && line.points.length >= 4) {
+    return { x1: line.points[0], y1: line.points[1], x2: line.points[2], y2: line.points[3] };
+  }
+  
+  return null;
 }
 
 function getPointOnLine(px, py, x1, y1, x2, y2) {
@@ -674,6 +699,7 @@ function findWallUnderMouse(mx, my, tol = 15) {
 }
 
 function drawOpeningMarkers() {
+  // Remove existing markers
   fabricCanvas.getObjects()
     .filter(o => o.isOpeningMarker)
     .forEach(o => fabricCanvas.remove(o));
@@ -709,14 +735,16 @@ function drawOpeningMarkers() {
 // ========== MODAL FUNCTIONS ==========
 function openOpeningDialog(wallResult) {
   pendingOpening = wallResult;
-  document.getElementById('openingDialog').classList.remove('hidden');
-  document.getElementById('openingDialog').classList.add('show');
+  const dialog = document.getElementById('openingDialog');
+  dialog.classList.remove('hidden');
+  dialog.classList.add('show');
 }
 
 function closeOpeningDialog() {
   pendingOpening = null;
-  document.getElementById('openingDialog').classList.remove('show');
-  document.getElementById('openingDialog').classList.add('hidden');
+  const dialog = document.getElementById('openingDialog');
+  dialog.classList.remove('show');
+  dialog.classList.add('hidden');
 }
 
 function createOpening(type) {
@@ -746,6 +774,8 @@ function createOpening(type) {
 
 // ========== MOUSE EVENTS ==========
 fabricCanvas.on('mouse:down', (opt) => {
+  if (!fabricCanvas) return;
+  
   const pointer = fabricCanvas.getPointer(opt.e);
   const mx = pointer.x, my = pointer.y;
   
@@ -810,6 +840,7 @@ function highlightSelected(point) {
   fabricCanvas.requestRenderAll();
 }
 
+// ========== STATS UPDATE ==========
 function updateStats() {
   let extLen = 0, intLen = 0, totalLen = 0, heatLoss = 0;
   const deltaT = 15;
@@ -831,10 +862,9 @@ function updateStats() {
   openings.forEach(opening => {
     const wall = walls[opening.wallIndex];
     if (wall?.mode === 'exterior') {
-      const wallU = wall.uValue;
-      const openingU = opening.type === 'door' ? 2.0 : 1.2;
       const openingArea = opening.width * (opening.type === 'door' ? DOOR_HEIGHT_M : WINDOW_HEIGHT_M);
-      heatLoss -= opening.width * WALL_HEIGHT_M * wallU * deltaT;
+      const openingU = opening.type === 'door' ? 2.0 : 1.2;
+      heatLoss -= opening.width * WALL_HEIGHT_M * wall.uValue * deltaT;
       heatLoss += openingArea * openingU * deltaT;
     }
   });
@@ -849,15 +879,15 @@ function updateStats() {
   document.getElementById('heatLoss').textContent = `${heatLoss.toFixed(1)} W/K`;
   
   const instr = {
-    exterior: 'Select Exterior Wall → Click first point → Click second point (axis-aligned only)',
-    interior: 'Select Interior Wall → Click first point → Click second point (axis-aligned only)',
-    opening: 'Select Add Opening → Click ON a wall → Choose window (0.8-2.0m) or door (0-2.1m)',
-    delete: 'Select Delete → Click on wall to remove'
+    exterior: 'Click first point → Click second point (axis-aligned)',
+    interior: 'Click first point → Click second point (axis-aligned)',
+    opening: 'Click ON a wall → Choose window or door',
+    delete: 'Click on wall to remove'
   };
   document.getElementById('instructionsText').textContent = instr[currentMode];
 }
 
-// ========== LOAD/SAVE ==========
+// ========== LOAD/SAVE FROM URL ==========
 function loadDesignFromURL() {
   const params = new URLSearchParams(window.location.search);
   const encoded = params.get('design');
@@ -876,24 +906,34 @@ function loadDesignFromURL() {
 }
 
 function loadDesign(data) {
+  // Clear existing
   walls.forEach(w => fabricCanvas.remove(w.fabricObj));
   walls = [];
   openings = [];
+  selectedPoint = null;
+  highlightSelected(null);
   
+  // Load walls
   data.walls.forEach((wallData) => {
-    const pointA = gridPoints[wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col];
-    const pointB = gridPoints[wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col];
+    const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
+    const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
+    
+    const pointA = gridPoints[idxA];
+    const pointB = gridPoints[idxB];
     
     if (pointA && pointB) {
       const oldMode = currentMode;
       currentMode = wallData.mode;
       createWall(pointA, pointB);
       currentMode = oldMode;
-      walls[walls.length - 1].uValue = wallData.uValue;
+      if (walls.length > 0 && typeof wallData.uValue === 'number') {
+        walls[walls.length - 1].uValue = wallData.uValue;
+      }
     }
   });
   
-  data.openings.forEach(o => {
+  // Load openings
+  data.openings.forEach((o) => {
     openings.push({
       ...o,
       width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH)
@@ -907,8 +947,6 @@ function loadDesign(data) {
 }
 
 function exportAsJSON() {
-  const TOTAL_Y = CANVAS_ROWS * MODULE_SIZE;
-  
   const data = {
     version: '2.0',
     unit: 'mm',
@@ -920,15 +958,12 @@ function exportAsJSON() {
       worldStart: w.worldStart,
       worldEnd: w.worldEnd
     })),
-    openings: openings.map(o => {
-      const wall = walls[o.wallIndex];
-      return {
-        type: o.type,
-        width: o.width * 1000,
-        position: o.position,
-        wallIndex: o.wallIndex
-      };
-    }),
+    openings: openings.map((o, i) => ({
+      type: o.type,
+      width: o.width * 1000,
+      position: o.position,
+      wallIndex: o.wallIndex
+    })),
     timestamp: Date.now()
   };
   
@@ -995,13 +1030,12 @@ function setupEventListeners() {
   
   document.getElementById('exportDesign').onclick = () => exportAsJSON();
   
-  // CLOUD SAVE BUTTON
+  // Cloud buttons
   document.getElementById('cloudSave').onclick = async () => {
-    const name = prompt('Enter design name (optional, leave blank for auto-generated):');
+    const name = prompt('Enter design name (optional):');
     await uploadDesignToJSONBin(name || null);
   };
   
-  // CLOUD LOAD BUTTON
   document.getElementById('cloudLoad').onclick = () => {
     loadDesignFromJSONBin();
   };
@@ -1022,12 +1056,15 @@ function setupEventListeners() {
 function setMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
+  const btnId = 'mode' + mode.charAt(0).toUpperCase() + mode.slice(1);
+  const btn = document.getElementById(btnId);
+  if (btn) btn.classList.add('active');
   selectedPoint = null;
   highlightSelected(null);
   updateStats();
 }
 
+// Helper
 function getWallLength(wall) {
   const dx = Math.abs(wall.pointA.col - wall.pointB.col) * MODULE_SIZE;
   const dy = Math.abs(wall.pointA.row - wall.pointB.row) * MODULE_SIZE;
