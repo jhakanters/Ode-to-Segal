@@ -1,6 +1,6 @@
 // ============================================
 // Segal House Designer - Energy Modeling Edition
-// FINAL FIXED VERSION with JSONBin Integration
+// UPDATED: Local export only, fixed rotation, B/W theme
 // ============================================
 
 const MODULE_SIZE = 900;
@@ -41,15 +41,9 @@ let floorGroup = null;
 let roofGroup = null;
 let autoRotate = true;
 let rotationAngle = 0;
+let rotationSpeed = 0.005;  // FIXED: Store rotation speed separately
 
 console.log('🚀 Initializing Segal House Designer...');
-
-// ========== JSONBIN.IO CONFIG ==========
-// ⚠️ REPLACE WITH YOUR ACTUAL KEY FROM JSONBIN DASHBOARD
-const JSONBIN_CONFIG = {
-  MASTER_KEY: "$2a$10$jo.i4BMv/ws1EDkIE3ppeuSfOThPyIARpCkpwA/CRPjCOQLa9hIQC",
-  BASE_URL: "https://api.jsonbin.io/v3/b"
-};
 
 // ========== INITIALIZATION ==========
 function initAll() {
@@ -81,7 +75,7 @@ function initAll() {
   initGridPoints();
   drawGridLines();
   setupEventListeners();
-  attachMouseHandlers();  // Add mouse handlers separately
+  attachMouseHandlers();
   updateStats();
   drawOpeningMarkers();
   loadDesignFromURL();
@@ -123,172 +117,6 @@ function resetZoom() {
   setZoom(1.0);
 }
 
-// ========== CLOUD SAVE/LOAD FUNCTIONS ==========
-
-async function uploadDesignToJSONBin(designName) {
-  const data = exportAsJSON();
-  
-  const payload = {
-    name: designName || `segal-design-${Date.now()}`,
-    version: '2.0',
-    unit: 'mm',
-    walls: data.walls,
-    openings: data.openings,
-    metadata: {
-      timestamp: Date.now(),
-      exteriorLength: parseFloat(document.getElementById('exteriorLength').textContent) || 0,
-      interiorLength: parseFloat(document.getElementById('interiorLength').textContent) || 0,
-      openingCount: parseInt(document.getElementById('openingCount').textContent) || 0,
-      energyScore: parseInt(document.getElementById('energyScore').textContent) || 100,
-      heatLoss: parseFloat(document.getElementById('heatLoss').textContent) || 0
-    }
-  };
-  
-  try {
-    console.log('📤 Sending upload request to JSONBin...');
-    const response = await fetch(JSONBIN_CONFIG.BASE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      throw new Error('HTTP ' + response.status + ': ' + response.statusText);
-    }
-    
-    const result = await response.json();
-    console.log('📥 Raw API response:', result);
-    
-    // FIX: New JSONBin API puts _id in result.metadata.id
-    let binId = null;
-    if (result.metadata && result.metadata.id) {
-      binId = result.metadata.id;
-      console.log('✅ Found Bin ID in result.metadata.id');
-    } else if (result.record && result.record._id) {
-      binId = result.record._id;
-      console.log('✅ Found Bin ID in result.record._id (old API)');
-    } else if (result._id) {
-      binId = result._id;
-      console.log('✅ Found Bin ID in result._id (alternative format)');
-    }
-    
-    if (!binId) {
-      console.error('❌ Could not find Bin ID in response!');
-      console.error('Full response:', result);
-      throw new Error('Invalid response format - no id found');
-    }
-    
-    console.log('✅ Design uploaded successfully!');
-    console.log('📋 Bin ID:', binId);
-    console.log('🔗 View URL:', 'https://jsonbin.io/bin/' + binId);
-    
-    alert('✓ Design saved to cloud!\n\nBin ID: ' + binId + '\n\nCopy this ID to load in Grasshopper!\nView: https://jsonbin.io/bin/' + binId);
-    
-    return binId;
-    
-  } catch (error) {
-    console.error('❌ Upload failed:', error);
-    alert('Upload failed: ' + error.message + '\n\nCheck console for details.');
-    return null;
-  }
-}
-
-async function loadDesignFromJSONBin(binId) {
-  if (!binId) {
-    binId = prompt('Enter JSONBin.io Bin ID:\n(Found after clicking "Save to Cloud" in Segal app)');
-    if (!binId || binId.trim() === '') {
-      return false;
-    }
-  }
-  
-  try {
-    const url = JSONBIN_CONFIG.BASE_URL + '/' + binId.trim() + '/latest';
-    console.log('📥 Loading from URL:', url);
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-Master-Key': JSONBIN_CONFIG.MASTER_KEY
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error('HTTP ' + response.status + ': ' + response.statusText);
-    }
-    
-    const result = await response.json();
-    console.log('📥 Loaded response:', result);
-    const data = result.record || result;  // Handle different response formats
-    
-    // Clear existing design
-    if (walls.length > 0) {
-      walls.forEach(function(w) {
-        fabricCanvas.remove(w.fabricObj);
-      });
-    }
-    walls = [];
-    openings = [];
-    selectedPoint = null;
-    highlightSelected(null);
-    
-    // Load walls
-    if (data.walls && Array.isArray(data.walls)) {
-      console.log('🧱 Loading', data.walls.length, 'walls');
-      data.walls.forEach(function(wallData) {
-        const idxA = wallData.pointA.row * (CANVAS_COLS + 1) + wallData.pointA.col;
-        const idxB = wallData.pointB.row * (CANVAS_COLS + 1) + wallData.pointB.col;
-        
-        const pointA = gridPoints[idxA];
-        const pointB = gridPoints[idxB];
-        
-        if (pointA && pointB) {
-          const oldMode = currentMode;
-          currentMode = wallData.mode;
-          createWall(pointA, pointB);
-          currentMode = oldMode;
-          
-          if (walls.length > 0 && typeof wallData.uValue === 'number') {
-            walls[walls.length - 1].uValue = wallData.uValue;
-          }
-        }
-      });
-    }
-    
-    // Load openings
-    if (data.openings && Array.isArray(data.openings)) {
-      console.log('🪟 Loading', data.openings.length, 'openings');
-      data.openings.forEach(function(o) {
-        openings.push({
-          type: o.type,
-          position: o.position,
-          width: Math.min(o.width || 0.85, MAX_OPENING_WIDTH),
-          wallIndex: o.wallIndex
-        });
-      });
-    }
-    
-    drawOpeningMarkers();
-    drawGridLines();
-    updateStats();
-    setTimeout(renderThreeScene, 100);
-    
-    const extLen = document.getElementById('exteriorLength').textContent || '0.0 m';
-    const energyScore = document.getElementById('energyScore').textContent || '100';
-    
-    console.log('✅ Design loaded successfully!');
-    alert('✓ Design loaded from cloud!\n\nExterior Walls: ' + extLen + '\nEnergy Score: ' + energyScore);
-    
-    return true;
-    
-  } catch (error) {
-    console.error('❌ Load failed:', error);
-    alert('Load failed: ' + error.message + '\n\nVerify Bin ID is correct.');
-    return false;
-  }
-}
-
 // ========== THREE.JS ==========
 function initThree() {
   const container = document.getElementById('three-canvas');
@@ -302,7 +130,7 @@ function initThree() {
   
   try {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xe8e8e8);
+    scene.background = new THREE.Color(0xf5f5f5);  // Light gray background
     
     camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     camera.position.set(15, 15, 15);
@@ -311,7 +139,7 @@ function initThree() {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
-    renderer.setClearColor(0xe8e8e8);
+    renderer.setClearColor(0xf5f5f5);
     
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -338,7 +166,10 @@ function initThree() {
     let prevMouse = { x: 0, y: 0 };
     const canvas3D = renderer.domElement;
     
-    canvas3D.addEventListener('mousedown', function() { isDragging = true; });
+    canvas3D.addEventListener('mousedown', function(e) { 
+      isDragging = true;
+      e.preventDefault();  // Prevent dragging from affecting rotation
+    });
     canvas3D.addEventListener('mouseup', function() { isDragging = false; });
     canvas3D.addEventListener('mouseleave', function() { isDragging = false; });
     
@@ -356,6 +187,9 @@ function initThree() {
       e.preventDefault();
       camera.position.multiplyScalar(1 + e.deltaY * 0.01);
     });
+    
+    // FIX: Prevent clicks on buttons from triggering rotation
+    canvas3D.style.pointerEvents = 'auto';
     
     window.addEventListener('resize', function() {
       const w = container.clientWidth;
@@ -395,9 +229,9 @@ function renderThreeScene() {
     };
   }
   
-  // Grid points
+  // Grid points - BLACK color (was green)
   const pointGeo = new THREE.SphereGeometry(0.08, 8, 8);
-  const pointMat = new THREE.MeshBasicMaterial({ color: 0x28a745 });
+  const pointMat = new THREE.MeshBasicMaterial({ color: 0x333333 });  // Changed from 0x28a745 (green) to dark gray
   gridPoints.forEach(function(p) {
     const pos = gridToWorld(p.gridData.col, p.gridData.row);
     const mesh = new THREE.Mesh(pointGeo, pointMat.clone());
@@ -405,7 +239,7 @@ function renderThreeScene() {
     gridPoints3DGroup.add(mesh);
   });
   
-  // Walls
+  // Walls - GRAY colors (was purple/blue)
   walls.forEach(function(wall, wallIdx) {
     const start = gridToWorld(wall.pointA.col, wall.pointA.row);
     const end = gridToWorld(wall.pointB.col, wall.pointB.row);
@@ -413,8 +247,9 @@ function renderThreeScene() {
     const length = Math.hypot(end.x - start.x, end.z - start.z);
     const angle = Math.atan2(end.z - start.z, end.x - start.x);
     
+    // EXTERIOR = DARK GRAY, INTERIOR = LIGHT GRAY (was purple/blue)
     const wallMat = new THREE.MeshPhongMaterial({
-      color: wall.mode === 'exterior' ? 0x6d4aff : 0x4fc3f7,
+      color: wall.mode === 'exterior' ? 0x333333 : 0x999999,
       transparent: true,
       opacity: 0.85
     });
@@ -431,7 +266,7 @@ function renderThreeScene() {
     wallMesh.castShadow = true;
     walls3DGroup.add(wallMesh);
     
-    // Openings on this wall
+    // Openings on this wall - BLUE/GRAY (kept some color distinction)
     openings.filter(function(o) { return o.wallIndex === wallIdx; }).forEach(function(opening) {
       const ratio = opening.position;
       const ox = start.x + (end.x - start.x) * ratio;
@@ -443,14 +278,14 @@ function renderThreeScene() {
       let openingMat;
       if (opening.type === 'door') {
         openingMat = new THREE.MeshPhongMaterial({
-          color: 0xff9800,
+          color: 0x666666,  // Dark gray (was orange)
           side: THREE.DoubleSide,
           transparent: true,
           opacity: 0.6
         });
       } else {
         openingMat = new THREE.MeshPhongMaterial({
-          color: 0x88ccff,
+          color: 0xcccccc,  // Light gray (was light blue)
           transparent: true,
           opacity: 0.4,
           side: THREE.DoubleSide,
@@ -491,7 +326,7 @@ function renderThreeScene() {
     const floorDepth = maxZ - minZ;
     
     if (floorWidth > 0 && floorDepth > 0) {
-      const floorMat = new THREE.MeshPhongMaterial({ color: 0xd2b48c, transparent: true, opacity: 0.9 });
+      const floorMat = new THREE.MeshPhongMaterial({ color: 0xe0e0e0, transparent: true, opacity: 0.9 });  // Light gray
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(floorWidth + 1, floorDepth + 1), floorMat);
       floor.rotation.x = -Math.PI / 2;
       floor.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
@@ -518,7 +353,7 @@ function renderThreeScene() {
     const roofDepth = maxZ - minZ;
     
     if (roofWidth > 0 && roofDepth > 0) {
-      const roofMat = new THREE.MeshPhongMaterial({ color: 0x8b4513, transparent: true, opacity: 0.7 });
+      const roofMat = new THREE.MeshPhongMaterial({ color: 0x808080, transparent: true, opacity: 0.7 });  // Medium gray
       const roof = new THREE.Mesh(new THREE.PlaneGeometry(roofWidth + 1, roofDepth + 1), roofMat);
       roof.rotation.x = Math.PI / 2;
       roof.position.set((minX + maxX) / 2, WALL_HEIGHT_M, (minZ + maxZ) / 2);
@@ -532,7 +367,8 @@ function renderThreeScene() {
 function animate() {
   requestAnimationFrame(animate);
   if (autoRotate && camera) {
-    rotationAngle += 0.005;
+    // FIXED: Use stored rotationSpeed instead of incrementing rotationAngle directly
+    rotationAngle += rotationSpeed;
     camera.position.x = Math.sin(rotationAngle) * 15;
     camera.position.z = Math.cos(rotationAngle) * 15;
     camera.lookAt(0, 1.5, 0);
@@ -552,8 +388,8 @@ function initGridPoints() {
         left: c * GRID_PIXEL_SIZE,
         top: r * GRID_PIXEL_SIZE,
         radius: 5,
-        fill: '#28a745',
-        stroke: '#1e7e34',
+        fill: '#666666',  // Changed from #28a745 (green) to gray
+        stroke: '#333333',  // Darker stroke
         strokeWidth: 1,
         originX: 'center',
         originY: 'center',
@@ -615,7 +451,7 @@ function drawGridLines() {
   }
   
   ctx.font = 'bold 11px Arial';
-  ctx.fillStyle = '#6d4aff';
+  ctx.fillStyle = '#333';  // Changed from purple (#6d4aff) to dark gray
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   
@@ -682,11 +518,12 @@ function createWall(pointA, pointB) {
   
   console.log('  U-value:', uValue);
   
+  // EXTERIOR = DARK GRAY, INTERIOR = LIGHT GRAY (was purple/blue)
   const line = new fabric.Line([
     pointA.left, pointA.top,
     pointB.left, pointB.top
   ], {
-    stroke: currentMode === 'exterior' ? '#6d4aff' : '#4fc3f7',
+    stroke: currentMode === 'exterior' ? '#333333' : '#999999',
     strokeWidth: 8,
     selectable: false,
     evented: false,
@@ -710,8 +547,6 @@ function createWall(pointA, pointB) {
     worldEnd: pointB.worldPos,
     uValue: uValue
   };
-  
-  console.log('  Created wall object:', wallData);
   
   walls.push(wallData);
   fabricCanvas.add(line);
@@ -797,11 +632,12 @@ function drawOpeningMarkers() {
     const px = coords.x1 + (coords.x2 - coords.x1) * opening.position;
     const py = coords.y1 + (coords.y2 - coords.y1) * opening.position;
     
+    // DOOR = DARK GRAY, WINDOW = LIGHT GRAY (was orange/blue)
     const marker = new fabric.Circle({
       left: px,
       top: py,
       radius: opening.type === 'door' ? 8 : 6,
-      fill: opening.type === 'door' ? '#ff9800' : '#4fc3f7',
+      fill: opening.type === 'door' ? '#666666' : '#cccccc',
       stroke: '#fff',
       strokeWidth: 2,
       originX: 'center',
@@ -828,7 +664,6 @@ function attachMouseHandlers() {
   
   fabricCanvas.on('mouse:down', function(opt) {
     console.log('🖱️ Mouse click detected!');
-    console.log('  Coordinates:', opt.e.clientX, opt.e.clientY);
     
     if (!fabricCanvas) {
       console.error('❌ Canvas became null during event!');
@@ -960,7 +795,7 @@ function createOpening(type) {
 
 function highlightSelected(point) {
   gridPoints.forEach(function(p) {
-    p.fill = (p === selectedPoint) ? '#ff6b6b' : '#28a745';
+    p.fill = (p === selectedPoint) ? '#ff6b6b' : '#666666';  // Red for selected, gray for others
   });
   fabricCanvas.requestRenderAll();
 }
@@ -1172,16 +1007,6 @@ function setupEventListeners() {
   
   document.getElementById('exportDesign').onclick = function() {
     exportAsJSON();
-  };
-  
-  // Cloud buttons
-  document.getElementById('cloudSave').onclick = function() {
-    const name = prompt('Enter design name (optional):');
-    uploadDesignToJSONBin(name);
-  };
-  
-  document.getElementById('cloudLoad').onclick = function() {
-    loadDesignFromJSONBin();
   };
   
   document.addEventListener('keydown', function(e) {
