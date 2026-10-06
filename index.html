@@ -42,13 +42,12 @@
           <button id="zoomOut">🔎 Zoom Out</button>
           <button id="resetZoom">🔲 Reset Zoom</button>
           <button id="exportDesign" class="secondary">💾 Export JSON</button>
-          <button id="checkCompliance" class="primary">✅ Check Compliance</button>
         </div>
       </div>
     </div>
     
-    <!-- ===== BFS 2026:9 COMPLIANCE PANEL ===== -->
-    <div class="compliance-panel hidden" id="compliancePanel">
+    <!-- ===== BFS 2026:9 COMPLIANCE PANEL (always visible) ===== -->
+    <div class="compliance-panel" id="compliancePanel">
       <div class="compliance-inputs">
         <label>
           Location:
@@ -59,17 +58,17 @@
         <label>
           Building type:
           <select id="buildingType">
-            <option value="single-story">Single-storey dwelling (Um ≤ 0.30)</option>
-            <option value="multi-story">Multi-storey dwelling (Um ≤ 0.40)</option>
+            <option value="single-story">Single-storey dwelling</option>
+            <option value="multi-story">Multi-storey dwelling</option>
           </select>
         </label>
         <label>
           Heating system:
           <select id="heatingSystem">
-            <option value="electric">Electric resistance (w 1.8, η 1.0)</option>
-            <option value="heatpump" selected>Heat pump, COP 3.0 (w 1.8)</option>
-            <option value="district">District heating (w 0.7, η 0.95)</option>
-            <option value="biofuel">Biofuel boiler (w 0.6, η 0.85)</option>
+            <option value="electric">Electric resistance (η 1.0)</option>
+            <option value="heatpump" selected>Heat pump (COP 3.0)</option>
+            <option value="district">District heating (η 0.95)</option>
+            <option value="biofuel">Biofuel boiler (η 0.85)</option>
           </select>
         </label>
         <label>
@@ -80,12 +79,12 @@
             <option value="0.8">80 %</option>
           </select>
         </label>
-        <button id="calculateCompliance" class="primary">Calculate</button>
+        <button id="calculateCompliance" class="primary">✅ Check Compliance</button>
       </div>
       
       <div class="compliance-results">
         <div class="compliance-status pending" id="complianceStatus">
-          Select a municipality and press Calculate
+          Draw walls, select a municipality, then press Check Compliance
         </div>
         <table class="compliance-table">
           <thead>
@@ -102,12 +101,12 @@
         <div class="disclaimer">
           ⚠️ <strong>Indicative calculation only — not for permit submission.</strong>
           Etal is estimated with a degree-hour method: climate approximated as
-          DH = 88,000 Kh × Fgeo (official geographic factor), standard values from
-          BFS 2026:9 Bilaga 1 (ventilation 0.35 l/s·m², internal gains 3.7 W/m²,
-          hot water 20 kWh/m²·yr, ~6,500 h heating season). Solar gains, thermal
+          DH = 88,000 Kh × Fgeo (official geographic factor per municipality),
+          standard values from BFS 2026:9 Bilaga 1 (ventilation 0.35 l/s·m²,
+          internal gains 3.7 W/m², hot water 20 kWh/m²·yr). Solar gains, thermal
           bridges, thermal mass, air leakage and system dynamics are NOT modelled.
           An official Etal requires an energy-balance calculation (§§ 7–13).
-          Roof U assumed 0.13 and floor U 0.15 (max allowed, Table 6 Bilaga 2).
+          Roof U assumed 0.13 and floor U 0.15 (Table 6 Bilaga 2).
         </div>
       </div>
     </div>
